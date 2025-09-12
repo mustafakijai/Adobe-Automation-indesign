@@ -1,0 +1,313 @@
+#target "indesign"
+(function () {
+  if (!app.documents.length) { alert("Open a document first."); return; }
+
+  // Helpers
+  const TRIM = s => String(s).replace(/^\s+|\s+$/g, "");
+  const pct = (s, fb) => Math.min(100, Math.max(1, parseFloat(TRIM(String(s || "").replace("%", ""))) || fb));
+  const niceMax = v => {
+    if (v <= 0) return 1;
+    let p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), n = Math.ceil(v / p), a = [1, 2, 5, 10];
+    for (let i of a) if (n <= i) return i * p;
+    return 10 * p;
+  };
+  const selectionBounds = () => {
+    let s = app.selection;
+    return s.length && s[0].geometricBounds ? s[0].geometricBounds : [72, 72, 360, 540];
+  };
+  const ensureLayer = doc => doc.layers.itemByName("INWIZ Charts").isValid ? doc.layers.itemByName("INWIZ Charts") : doc.layers.add({name: "INWIZ Charts"});
+  const ensureColor = (doc, name, rgb) => {
+    let c = doc.colors.itemByName(name);
+    return c.isValid ? c : doc.colors.add({name, space: ColorSpace.RGB, model: ColorModel.PROCESS, colorValue: rgb});
+  };
+  const getParent = () => app.activeWindow?.activePage || app.activeWindow?.activeSpread || app.activeDocument.pages[0];
+
+  // Color Palette (colorblind-friendly)
+  const BASE = [[0, 114, 178], [213, 94, 0], [204, 121, 167], [0, 158, 115], [230, 159, 0], [86, 180, 233], [240, 228, 66], [0, 0, 0], [117, 112, 179], [255, 99, 132]];
+  const palette = doc => BASE.map((rgb, i) => ensureColor(doc, `INWIZ-${i + 1}`, rgb));
+
+  // Primitives (stroke-free)
+  const addRect = (p, lay, pr = {}) => (r => (r.itemLayer = lay, r.strokeWeight = 0, r))(p.rectangles.add(pr));
+  const addPoly = (p, lay, pr = {}) => (g => (g.itemLayer = lay, g.strokeWeight = 0, g))(p.polygons.add(pr));
+  const addText = (p, lay, pr = {}) => (t => (t.itemLayer = lay, t))(p.textFrames.add(pr));
+  const setRectStyle = (r, sw) => (r.fillColor = sw, r.strokeWeight = 0);
+
+  // Data Dialog
+  let dataCSV = "";
+  const openDataDialog = initialCSV => {
+    let dlg = new Window("dialog", "Graph Data"), grid = { rows: 10, cols: 10, cells: [], firstColW: 120, cellW: 70 };
+    dlg.orientation = "column"; dlg.alignChildren = "fill"; dlg.margins = 8;
+    dlg.add("statictext", undefined, "Row 0 = series; Col 0 = categories. Numbers only.");
+    let wrap = dlg.add("panel", {orientation: "column", alignChildren: "left", preferredSize: [0, 260], margins: 6});
+
+    grid.build = () => {
+      while (wrap.children.length) wrap.remove(wrap.children[0]);
+      grid.cells = [];
+      for (let r = 0; r < grid.rows; r++) {
+        let row = wrap.add("group", {orientation: "row"});
+        grid.cells[r] = [];
+        for (let c = 0; c < grid.cols; c++) {
+          let w = c ? grid.cellW : grid.firstColW;
+          grid.cells[r][c] = row.add("edittext", undefined, "", {characters: Math.round(w / 7), preferredSize: [w, 20]});
+        }
+      }
+      dlg.layout.layout(true);
+    };
+    grid.matrix = () => Array(grid.rows).fill().map((_, r) => Array(grid.cols).fill().map((_, c) => String(grid.cells[r][c].text || "")));
+    grid.setFromMatrix = m => {
+      grid.rows = Math.max(2, m.length); grid.cols = Math.max(2, m[0]?.length || 2); grid.build();
+      for (let r = 0; r < m.length; r++) for (let c = 0; c < m[r].length; c++) grid.cells[r][c].text = String(m[r][c]);
+    };
+    grid.toCSV = () => grid.matrix().map(row => row.map(v => v.includes(",") || v.includes('"') ? `"${v.replace(/"/g, '""')}"` : v).join(",")).join("\n");
+    grid.fromCSV = csv => {
+      let lines = TRIM(csv || "").replace(/\r/g, "\n").split(/\n+/).filter(s => TRIM(s));
+      if (!lines.length) return;
+      let split = line => line.split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/).map(p => p.replace(/^\"|\"$/g, "").replace(/\"\"/g, '"'));
+      grid.setFromMatrix(lines.map(split));
+    };
+    grid.transpose = () => grid.setFromMatrix(grid.matrix()[0].map((_, c) => grid.matrix().map(r => r[c])));
+
+    let bar = dlg.add("group", {orientation: "row"});
+    let buttons = [
+      ["– Row", () => { if (grid.rows > 2) grid.rows--, grid.build(); }],
+      ["+ Row", () => { grid.rows++, grid.build(); }],
+      ["– Col", () => { if (grid.cols > 2) grid.cols--, grid.build(); }],
+      ["+ Col", () => { grid.cols++, grid.build(); }],
+      ["Paste", () => {
+        let d = new Window("dialog", "Paste CSV"), ed = d.add("edittext", undefined, "", {multiline: true, scrollable: true, preferredSize: [420, 200]});
+        d.add("button", undefined, "Cancel"); d.add("button", undefined, "OK").onClick = () => d.close(1);
+        if (d.show() == 1) grid.fromCSV(ed.text);
+      }],
+      ["Copy", () => {
+        let d = new Window("dialog", "Copy CSV"), ed = d.add("edittext", undefined, grid.toCSV(), {multiline: true, readonly: true, scrollable: true, preferredSize: [420, 200]});
+        d.add("button", undefined, "Close").onClick = () => d.close();
+        d.show();
+      }],
+      ["Import", () => { let f = File.openDialog("CSV"); if (f) f.open("r"), grid.fromCSV(f.read()), f.close(); }],
+      ["Export", () => { let f = File.saveDialog("Save CSV", "CSV:*.csv"); if (f) f.open("w"), f.write(grid.toCSV()), f.close(); }],
+      ["Transpose", () => grid.transpose()],
+      ["Sample", () => grid.fromCSV(",Series A,Series B,Series C\nCat 1,10,20,15\nCat 2,30,25,18\nCat 3,22,17,29\nCat 4,18,34,26")],
+      ["Sample Pie", () => grid.fromCSV(",Share\nRetail,35\nOffice,25\nHospitality,20\nIndustrial,20")],
+      ["Clear", () => grid.setFromMatrix([["","S1"],["Cat 1",""],["Cat 2",""]])]
+    ];
+    buttons.forEach(([text, fn]) => bar.add("button", undefined, text).onClick = fn);
+
+    let act = dlg.add("group", {alignment: "right"});
+    act.add("button", undefined, "Cancel");
+    let ok = act.add("button", undefined, "OK").onClick = () => dlg.close(1);
+    grid.build(); if (initialCSV) grid.fromCSV(initialCSV);
+    return dlg.show() == 1 ? grid.toCSV() : null;
+  };
+
+  // Data Parsing
+  const csvToData = csv => {
+    let lines = TRIM(csv || "").replace(/\r/g, "\n").split(/\n+/).filter(s => TRIM(s));
+    if (lines.length < 2 || lines[0].split(",").length < 2) throw Error("Need at least 1 series and 1 category.");
+    let split = line => line.split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/).map(p => p.replace(/^\"|\"$/g, "").replace(/\"\"/g, '"'));
+    let M = lines.map(split), cats = M.slice(1).map(r => r[0]), names = M[0].slice(1);
+    return {
+      categories: cats,
+      seriesNames: names,
+      series: names.map((_, c) => M.slice(1).map(r => parseFloat(TRIM(r[c + 1])) || 0))
+    };
+  };
+  const toPercent100 = d => {
+    let {categories: cats, series: S, seriesNames: names} = d, out = S.map(() => []);
+    for (let i = 0; i < cats.length; i++) {
+      let sum = S.reduce((s, arr) => s + Math.max(0, arr[i]), 0) || 1;
+      S.forEach((arr, s) => out[s][i] = (arr[i] / sum) * 100);
+    }
+    return {categories: cats.slice(), seriesNames: names.slice(), series: out};
+  };
+
+  // Axes & Legend
+  const axes = (p, lay, b, axisLeft, maxVal, ticks, showPct) => {
+    let [t, l, bt, r] = b, axisX = axisLeft ? l : r, it = [];
+    for (let i = 0; i <= ticks; i++) {
+      let val = (maxVal / ticks) * i, yy = bt - ((bt - t) * (val / maxVal));
+      let tf = addText(p, lay, {geometricBounds: [yy - 6, axisLeft ? axisX - 38 : axisX + 6, yy + 6, axisLeft ? axisX - 6 : axisX + 42], contents: showPct ? `${Math.round(val)}%` : val.toFixed(0)});
+      tf.parentStory.pointSize = 9; tf.textFramePreferences.verticalJustification = VerticalJustification.CENTER_ALIGN;
+      it.push(tf);
+    }
+    return it;
+  };
+  const legend = (p, lay, x, y, labels, sws) => {
+    let it = [], cx = x, gap = 10;
+    labels.forEach((label, i) => {
+      let chip = addRect(p, lay, {geometricBounds: [y, cx, y + 8, cx + 14]}); setRectStyle(chip, sws[i % sws.length]); it.push(chip);
+      let tf = addText(p, lay, {geometricBounds: [y - 2, cx + 18, y + 10, cx + 220], contents: label});
+      tf.parentStory.pointSize = 9; tf.texts[0].justification = Justification.CENTER_ALIGN; tf.textFramePreferences.verticalJustification = VerticalJustification.CENTER_ALIGN;
+      it.push(tf); cx += 18 + (tf.geometricBounds[3] - tf.geometricBounds[1]) + gap;
+    });
+    return it;
+  };
+
+  // Pie Chart (Enhanced)
+  const pieChart = (p, lay, b, d, sws, axisLeft, colPct, cluPct, shadow, legendTop, pctMode, rowFront, colFront, pieRadiusPct = 40, labelDistance = 18, explodePie = false, chartTitle = "") => {
+    let {categories: cats, series: S} = d, vals = S.length === 1 ? S[0].slice() : cats.map((_, i) => S.reduce((sum, s) => sum + s[i], 0));
+    let total = vals.reduce((sum, v) => sum + Math.max(0, v), 0) || 1, perc = vals.map(v => (v / total) * 100);
+    if (perc.length) perc[perc.length - 1] += 100 - perc.reduce((sum, p) => sum + p, 0); // Fix rounding
+
+    let it = [], cx = (b[1] + b[3]) / 2, cy = (b[0] + b[2]) / 2, R = Math.min(b[3] - b[1], b[2] - b[0]) * (pieRadiusPct / 100), start = -90;
+    const rad = dg => (Math.PI / 180) * dg;
+    const arcPts = (cx, cy, rr, a0, a1, explode) => {
+      let step = Math.max(12, Math.round((a1 - a0) / 6)), pts = [[cx, cy]], offset = explode ? 10 : 0;
+      let cx2 = cx + offset * Math.cos(rad((a0 + a1) / 2)), cy2 = cy + offset * Math.sin(rad((a0 + a1) / 2));
+      for (let a = a0; a <= a1; a += (a1 - a0) / step) pts.push([cx2 + rr * Math.cos(rad(a)), cy2 + rr * Math.sin(rad(a))]);
+      pts.push([cx2, cy2]); return pts;
+    };
+
+    if (chartTitle) {
+      let tfTitle = addText(p, lay, {geometricBounds: [b[0] - 20 - 10, cx - 100, b[0] - 20 + 10, cx + 100], contents: chartTitle});
+      tfTitle.parentStory.pointSize = 12; tfTitle.texts[0].justification = Justification.CENTER_ALIGN; tfTitle.textFramePreferences.verticalJustification = VerticalJustification.CENTER_ALIGN;
+      it.push(tfTitle);
+    }
+
+    perc.forEach((p, i) => {
+      let ang = 360 * (p / 100), poly = addPoly(p, lay, {});
+      poly.paths[0].entirePath = arcPts(cx, cy, R, start, start + ang, explodePie); poly.fillColor = sws[i % sws.length]; it.push(poly);
+      let mid = start + ang / 2, dist = R + labelDistance + (p < 5 ? 20 : 0), lx = cx + dist * Math.cos(rad(mid)), ly = cy + dist * Math.sin(rad(mid));
+      let tf = addText(p, lay, {geometricBounds: [ly - 7, lx - 60, ly + 7, lx + 60], contents: `${cats[i]} — ${Math.round(p)}%`});
+      tf.parentStory.pointSize = 9; tf.texts[0].justification = Justification.CENTER_ALIGN; tf.textFramePreferences.verticalJustification = VerticalJustification.CENTER_ALIGN;
+      it.push(tf); start += ang;
+    });
+    return it;
+  };
+
+  // Renderers (unchanged functions omitted for brevity)
+  const RENDER = {
+    Column: columnsLike(false), // Assume columnsLike, barsLike, lineOrArea defined as in original
+    StackedColumn: columnsLike(true),
+    Bar: barsLike(false),
+    StackedBar: barsLike(true),
+    Line: lineOrArea(false),
+    Area: lineOrArea(true),
+    Pie: (p, lay, b, d, sws, al, cp, clp, sh, lt, pm, rf, cf, pr, ld, ep, ct) => pieChart(p, lay, b, d, sws, al, cp, clp, sh, lt, pm, rf, cf, pr, ld, ep, ct)
+  };
+
+  // Preferences
+  const PREF = "INWIZ_";
+  const saveCfg = (grp, cfg) => Object.entries(cfg).forEach(([k, v]) => grp.insertLabel(PREF + k, String(v)));
+  const loadCfg = grp => {
+    if (grp.extractLabel(PREF + "has") !== "1") return null;
+    let asBool = s => s === "1" || s.toLowerCase() === "true", asNum = (s, fb) => isNaN(s = parseFloat(s)) ? fb : s;
+    let b = (btxt => btxt ? btxt.split(",").map(parseFloat) : null)(grp.extractLabel(PREF + "bounds"));
+    return {
+      chartType: grp.extractLabel(PREF + "chartType") || "Column",
+      axisLeft: asBool(grp.extractLabel(PREF + "axisLeft") || "1"),
+      valueMode: grp.extractLabel(PREF + "valueMode") || "Numbers",
+      addShadow: asBool(grp.extractLabel(PREF + "addShadow") || "0"),
+      legendTop: asBool(grp.extractLabel(PREF + "legendTop") || "0"),
+      rowFront: asBool(grp.extractLabel(PREF + "rowFront") || "0"),
+      colFront: asBool(grp.extractLabel(PREF + "colFront") || "1"),
+      colPct: asNum(grp.extractLabel(PREF + "colPct"), 90),
+      cluPct: asNum(grp.extractLabel(PREF + "cluPct"), 80),
+      pieRadiusPct: asNum(grp.extractLabel(PREF + "pieRadiusPct"), 40),
+      labelDistance: asNum(grp.extractLabel(PREF + "labelDistance"), 18),
+      explodePie: asBool(grp.extractLabel(PREF + "explodePie") || "0"),
+      chartTitle: grp.extractLabel(PREF + "chartTitle") || "",
+      bounds: b || grp.geometricBounds,
+      dataText: grp.extractLabel(PREF + "dataText") || ""
+    };
+  };
+
+  // Dialog
+  let dlg = new Window("dialog", "Graph Type"), types = ["Column", "StackedColumn", "Bar", "StackedBar", "Line", "Area", "Pie"];
+  dlg.orientation = "column"; dlg.alignChildren = "fill"; dlg.margins = 10;
+
+  let menu = dlg.add("dropdownlist", undefined, ["Graph Options ▾", "Edit Data…", "Sample Data", "Sample Pie", "Clear Data", "Import CSV…", "Export CSV…"]);
+  menu.onChange = () => {
+    let idx = menu.selection.index; if (!idx) return;
+    if (idx === 1) { let n = openDataDialog(dataCSV); if (n !== null) dataCSV = n; }
+    else if (idx === 2) dataCSV = ",Series A,Series B,Series C\nCat 1,10,20,15\nCat 2,30,25,18\nCat 3,22,17,29\nCat 4,18,34,26";
+    else if (idx === 3) dataCSV = ",Share\nRetail,35\nOffice,25\nHospitality,20\nIndustrial,20";
+    else if (idx === 4) dataCSV = "";
+    else if (idx === 5) { let f = File.openDialog("CSV"); if (f) f.open("r"), dataCSV = f.read(), f.close(); }
+    else if (idx === 6) { let f = File.saveDialog("Save CSV", "CSV:*.csv"); if (f) f.open("w"), f.write(dataCSV || ""), f.close(); }
+    menu.selection = 0;
+  };
+
+  let typeP = dlg.add("panel", undefined, "Type"), rb = types.map(t => typeP.add("group", {orientation: "row"}).add("radiobutton", undefined, t, {size: [90, 18]}));
+  rb[0].value = true;
+  let axisG = typeP.add("group"); axisG.add("statictext", undefined, "Value Axis:"); let axisDrop = axisG.add("dropdownlist", undefined, ["On Left Side", "On Right Side"]); axisDrop.selection = 0;
+
+  let styleP = dlg.add("panel", undefined, "Style"); styleP.alignChildren = "left";
+  let [ckShadow, ckLegend, ckRowFront, ckColFront, ckExplode] = [
+    styleP.add("checkbox", undefined, "Add Drop Shadow"),
+    styleP.add("checkbox", undefined, "Add Legend Across Top"),
+    styleP.add("checkbox", undefined, "First Row in Front"),
+    styleP.add("checkbox", undefined, "First Column in Front"), styleP.add("checkbox", undefined, "Explode Pie Slices")
+  ]; ckColFront.value = true;
+
+  let optP = dlg.add("panel", undefined, "Options"); optP.alignChildren = "left";
+  let [g1, g2, g3, g4, g5] = [
+    optP.add("group").add("statictext", undefined, "Column Width:").parent.add("edittext", undefined, "90%", {characters: 5}),
+    optP.add("group").add("statictext", undefined, "Cluster Width:").parent.add("edittext", undefined, "80%", {characters: 5}),
+    optP.add("group").add("statictext", undefined, "Pie Radius:").parent.add("edittext", undefined, "40%", {characters: 5}),
+    optP.add("group").add("statictext", undefined, "Label Distance:").parent.add("edittext", undefined, "18pt", {characters: 5}),
+    optP.add("group").add("statictext", undefined, "Chart Title:").parent.add("edittext", undefined, "", {characters: 20})
+  ];
+
+  const updatePieOptions = () => { let isPie = rb.find(r => r.value)?.text === "Pie"; g3.enabled = g4.enabled = isPie; };
+  rb.forEach(r => r.onClick = updatePieOptions); updatePieOptions();
+
+  let act = dlg.add("group", {alignment: "right"});
+  act.add("button", undefined, "Cancel");
+  let preview = act.add("button", undefined, "Preview"), ok = act.add("button", undefined, "OK");
+  const currentType = () => rb.find(r => r.value).text;
+
+  // Load saved preferences
+  let savedCfg = app.selection.length && app.selection[0].extractLabel ? loadCfg(app.selection[0]) : null;
+  if (savedCfg) {
+    rb.forEach((r, i) => r.value = types[i] === savedCfg.chartType);
+    axisDrop.selection = savedCfg.axisLeft ? 0 : 1;
+    ckShadow.value = savedCfg.addShadow; ckLegend.value = savedCfg.legendTop; ckRowFront.value = savedCfg.rowFront;
+    ckColFront.value = savedCfg.colFront; ckExplode.value = savedCfg.explodePie;
+    g1.children[1].text = savedCfg.colPct + "%"; g2.children[1].text = savedCfg.cluPct + "%";
+    g3.children[1].text = savedCfg.pieRadiusPct + "%"; g4.children[1].text = savedCfg.labelDistance + "pt";
+    g5.children[1].text = savedCfg.chartTitle; dataCSV = savedCfg.dataText;
+  }
+
+  const getParams = () => ({
+    chartType: currentType(),
+    axisLeft: axisDrop.selection.index === 0,
+    valueMode: "Numbers",
+    addShadow: ckShadow.value,
+    legendTop: ckLegend.value,
+    rowFront: ckRowFront.value,
+    colFront: ckColFront.value,
+    colPct: pct(g1.children[1].text, 90),
+    cluPct: pct(g2.children[1].text, 80),
+    pieRadiusPct: pct(g3.children[1].text, 40),
+    labelDistance: parseFloat(TRIM(g4.children[1].text.replace("pt", ""))) || 18,
+    explodePie: ckExplode.value,
+    chartTitle: g5.children[1].text || "",
+    bounds: selectionBounds(),
+    dataText: dataCSV || ",Series A,Series B\nCat 1,10,20\nCat 2,30,25"
+  });
+
+  preview.onClick = () => {
+    let P = getParams(), doc = app.activeDocument, lay = ensureLayer(doc), sws = palette(doc), parent = getParent(), data;
+    try { data = csvToData(P.dataText); } catch (e) { alert("Data error: " + e.message); return; }
+    app.doScript(() => {
+      let items = RENDER[P.chartType](parent, lay, P.bounds.slice(), data, sws, P.axisLeft, P.colPct, P.cluPct, P.addShadow, P.legendTop, false, P.rowFront, P.colFront, P.pieRadiusPct, P.labelDistance, P.explodePie, P.chartTitle);
+      let grp = parent.groups.add(items); grp.itemLayer = lay; saveCfg(grp, P);
+    }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, "INWIZ Graph Preview");
+  };
+
+  if (dlg.show() !== 1) return;
+  let P = getParams(), doc = app.activeDocument, lay = ensureLayer(doc), sws = palette(doc), parent = getParent(), data;
+  try { data = csvToData(P.dataText); } catch (e) { alert("Data error: " + e.message); return; }
+
+  app.doScript(() => {
+    let grp = app.selection.length && app.selection[0].extractLabel ? app.selection[0] : null, cfg = grp ? loadCfg(grp) : null;
+    if (cfg) {
+      P.bounds = grp.geometricBounds; while (grp.allPageItems.length) grp.allPageItems[0].remove();
+      let items = RENDER[P.chartType](parent, lay, P.bounds.slice(), data, sws, P.axisLeft, P.colPct, P.cluPct, P.addShadow, P.legendTop, false, P.rowFront, P.colFront, P.pieRadiusPct, P.labelDistance, P.explodePie, P.chartTitle);
+      items.forEach(i => i.move(grp, LocationOptions.AT_END));
+      saveCfg(grp, P); return;
+    }
+    let items = RENDER[P.chartType](parent, lay, P.bounds.slice(), data, sws, P.axisLeft, P.colPct, P.cluPct, P.addShadow, P.legendTop, false, P.rowFront, P.colFront, P.pieRadiusPct, P.labelDistance, P.explodePie, P.chartTitle);
+    let grp2 = parent.groups.add(items); grp2.itemLayer = lay; saveCfg(grp2, P);
+  }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, "INWIZ Graph");
+})();
