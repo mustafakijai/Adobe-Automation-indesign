@@ -1,0 +1,286 @@
+#target "indesign"
+#targetengine "session"
+
+/*
+  INWIZ_Graph_TightFit_Pro.jsx
+  • Draws Pie / Donut / Column / Bar inside current selection (or 350×250 centered)
+  • Optional: delete selection box after drawing
+  • Strokes removed everywhere
+  • Responsive, tight labels (Source Sans Pro Light) with precise formatting
+  • JLL palette (edit BASE)
+*/
+
+(function () {
+  if (!app.documents.length) { alert("Open a document first."); return; }
+  var doc = app.activeDocument;
+
+  // -------------------- CONFIG (defaults) --------------------
+  var DEFAULT_DATA_PIE = ",Share\nRetail,35\nOffice,25\nHospitality,20\nIndustrial,20";
+  var DEFAULT_DATA_BC  = ",Series A,Series B\nCat 1,10,20\nCat 2,30,25\nCat 3,22,17\nCat 4,18,34";
+  var BASE = [[167,143,129],[0,96,118],[72,145,163],[127,72,123],[90,162,104],[101,88,78],[188,117,121],[47,101,55],[174,117,169],[139,151,155]]; // JLL palette
+
+  // -------------------- UTILITIES --------------------
+  function TRIM(s){return String(s).replace(/^\s+|\s+$/g,"");}
+  function none(){ try{return doc.swatches.itemByName("None");}catch(e){return doc.swatches.item(2);} }
+  function paper(){ try{return doc.swatches.itemByName("Paper");}catch(e){return doc.swatches.item(0);} }
+  function killStroke(o){ try{o.strokeWeight=0;o.strokeColor=none();o.strokeTint=100;}catch(_){ } return o; }
+  function deepNoStroke(g){ var it=g.allPageItems, i; for(i=0;i<it.length;i++) killStroke(it[i]); killStroke(g); }
+  function ensureLayer(){ try{var L=doc.layers.itemByName("INWIZ Charts");L.name;return L;}catch(e){return doc.layers.add({name:"INWIZ Charts"});} }
+  function ensureColor(name,rgb){ try{var c=doc.colors.itemByName(name);c.name;c.space=ColorSpace.RGB;c.model=ColorModel.PROCESS;c.colorValue=rgb;return c;}catch(e){return doc.colors.add({name:name,space:ColorSpace.RGB,model:ColorModel.PROCESS,colorValue:rgb});} }
+  function palette(){ var a=[],i; for(i=0;i<BASE.length;i++) a.push(ensureColor("INWIZ-"+(i+1),BASE[i])); return a; }
+  function activePage(){ var w=app.layoutWindows.length?app.layoutWindows[0]:null; return (w && w.activePage) ? w.activePage : doc.pages[0]; }
+
+  function selectionInfo(){
+    var s=app.selection;
+    if(s.length && s[0].hasOwnProperty("geometricBounds")) return {bounds:s[0].geometricBounds, item:s[0]};
+    var pg=activePage().bounds, W=pg[3]-pg[1], H=pg[2]-pg[0], w=350, h=250, cx=(pg[1]+pg[3])/2, cy=(pg[0]+pg[2])/2;
+    return {bounds:[cy-h/2, cx-w/2, cy+h/2, cx+w/2], item:null};
+  }
+  function squareInside(b, pad){
+    var t=b[0],l=b[1],bt=b[2],r=b[3],W=r-l,H=bt-t,S=Math.min(W,H)-2*pad, cx=(l+r)/2, cy=(t+bt)/2;
+    if(S<2) S=2; return [cy-S/2, cx-S/2, cy+S/2, cx+S/2];
+  }
+  function niceMax(v){ if(v<=0) return 1; var p=Math.pow(10,Math.floor(Math.log(v)/Math.LN10)), n=Math.ceil(v/p), a=[1,2,5,10]; for(var i=0;i<a.length;i++) if(n<=a[i]) return a[i]*p; return 10*p; }
+
+  // numbers → precise labels
+  function fmtNum(n, dec){
+    var s = (dec>0) ? (Math.round(n*Math.pow(10,dec))/Math.pow(10,dec)).toFixed(dec) : Math.round(n).toString();
+    // thousand separators
+    var x = s.split("."), int=x[0], frac=x.length>1?("." + x[1]):"";
+    var rgx=/(\d+)(\d{3})/; while(rgx.test(int)) int=int.replace(rgx,'$1'+','+'$2');
+    return int+frac;
+  }
+  function fmtPct(p, dec){ return fmtNum(p, dec) + "%"; }
+
+  // tight text (responsive)
+  function setSSP(tf, pt, just){
+    try{ tf.texts[0].appliedFont="Source Sans Pro\tLight"; }
+    catch(_){ try{ tf.texts[0].appliedFont="Source Sans Pro\tRegular"; }
+      catch(__){ try{ tf.texts[0].appliedFont="Arial\tRegular"; }catch(___){}}}
+    try{ tf.texts[0].pointSize=pt; }catch(_){}
+    try{ tf.texts[0].justification= just || Justification.CENTER_ALIGN; }catch(_){}
+    try{ tf.textFramePreferences.firstBaselineOffset = FirstBaseline.CAP_HEIGHT; }catch(_){}
+    try{ tf.textFramePreferences.minimumFirstBaselineOffset = 0; }catch(_){}
+    try{ tf.textFramePreferences.autoSizingType = AutoSizingTypeEnum.OFF; }catch(_){}
+    try{ tf.parentStory.recompose(); tf.fit(FitOptions.FRAME_TO_CONTENT); tf.parentStory.recompose(); tf.fit(FitOptions.FRAME_TO_CONTENT); }catch(_){}
+  }
+  function centerLabel(parent, lay, x, y, text, pt, just){
+    var tf = parent.textFrames.add(); tf.itemLayer=lay; killStroke(tf);
+    tf.contents=text; tf.geometricBounds=[y-5,x-40,y+5,x+40];
+    setSSP(tf,pt,just);
+    var b=tf.geometricBounds,w=b[3]-b[1],h=b[2]-b[0];
+    tf.geometricBounds=[y-h/2,x-w/2,y+h/2,x+w/2];
+    return tf;
+  }
+  function leftLabel(parent, lay, xLeft, yCenter, text, pt){
+    var tf = parent.textFrames.add(); tf.itemLayer=lay; killStroke(tf);
+    tf.contents=text; tf.geometricBounds=[yCenter-5,xLeft,yCenter+5,xLeft+160];
+    setSSP(tf,pt,Justification.LEFT_ALIGN);
+    var b=tf.geometricBounds,w=b[3]-b[1],h=b[2]-b[0];
+    tf.geometricBounds=[yCenter-h/2,xLeft,yCenter+h/2,xLeft+w];
+    return tf;
+  }
+
+  // CSV → data
+  function csvToData(csv){
+    var lines=String(csv||"").replace(/\r/g,"\n").split(/\n+/), rows=[], i;
+    function split(line){ var p=String(line).split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/), k; for(k=0;k<p.length;k++) p[k]=p[k].replace(/^\"|\"$/g,"").replace(/\"\"/g,'"'); return p; }
+    for(i=0;i<lines.length;i++){ var s=TRIM(lines[i]); if(s) rows.push(split(s)); }
+    if(rows.length<2 || rows[0].length<2) throw Error("Need header + at least 1 row.");
+    var names=rows[0].slice(1), cats=[], S=[], c,r,v;
+    for(r=1;r<rows.length;r++) cats.push(rows[r][0]);
+    for(c=1;c<rows[0].length;c++){ var col=[]; for(r=1;r<rows.length;r++){ v=parseFloat(TRIM(rows[r][c])); col.push(isNaN(v)?0:v); } S.push(col); }
+    return {categories:cats, seriesNames:names, series:S};
+  }
+
+  // primitives
+  function addRect(p,lay,b){ var r=p.rectangles.add(); r.itemLayer=lay; if(b) r.geometricBounds=b; return killStroke(r); }
+  function addPoly(p,lay){ var g=p.polygons.add(); g.itemLayer=lay; return killStroke(g); }
+  function addOval(p,lay,b){ var o=p.ovals.add(); o.itemLayer=lay; if(b) o.geometricBounds=b; return killStroke(o); }
+
+  // legend (inside top)
+  function legendRow(parent, lay, b, labels, sws, pt){
+    if(!labels || !labels.length) return [];
+    var t=b[0]+6, l=b[1]+6, x=l, y=t, gap=10, it=[];
+    for(var i=0;i<labels.length;i++){
+      var chip=addRect(parent,lay,[y,x,y+7,x+12]); chip.fillColor=sws[i%sws.length]; it.push(chip);
+      var lab=leftLabel(parent,lay,x+14,y+3.5,labels[i],pt); it.push(lab);
+      x = lab.geometricBounds[3] + gap;
+      if(x > b[3]-60){ x=l; y += 12; }
+    }
+    return it;
+  }
+
+  // arc approximation
+  function arcPoints(cx,cy,r,a0,a1){
+    var RAD=Math.PI/180, steps=Math.max(60, Math.round((a1-a0)/2)), pts=[[cx,cy]], k, ang;
+    for(k=0;k<=steps;k++){ ang=a0+(a1-a0)*(k/steps); pts.push([cx+r*Math.cos(ang*RAD), cy+r*Math.sin(ang*RAD)]); }
+    pts.push([cx,cy]); return pts;
+  }
+
+  // renderers
+  function drawPieOrDonut(parent, lay, b, data, sws, asDonut, innerPct, startDeg, basePT, pctDec){
+    var W=b[3]-b[1], H=b[2]-b[0], pad=Math.max(2, Math.min(W,H)*0.02);
+    var sq=squareInside(b,pad);
+    var cx=(sq[1]+sq[3])/2, cy=(sq[0]+sq[2])/2, R=(sq[3]-sq[1])/2;
+
+    var cats=data.categories, S=data.series, vals=[], i,s;
+    if(S.length===1){ vals=S[0].slice(0); } else { for(i=0;i<cats.length;i++){ var sum=0; for(s=0;s<S.length;s++) sum+=S[s][i]; vals.push(sum); } }
+    var total=0; for(i=0;i<vals.length;i++) total+=Math.max(0,vals[i]); if(total<=0) total=1;
+
+    var it = legendRow(parent, lay, b, data.seriesNames, sws, basePT);
+    var start=isNaN(startDeg)?-90:startDeg, end, pct, mid, lx, ly;
+
+    for(i=0;i<vals.length;i++){
+      pct=(vals[i]/total)*100; end=start+(pct/100)*360;
+      var poly=addPoly(parent,lay); poly.paths[0].entirePath=arcPoints(cx,cy,R,start,end); poly.fillColor=sws[i%sws.length]; it.push(poly);
+
+      // label inside slice
+      mid=(start+end)/2;
+      var rLabel = (pct<8 ? R*0.80 : R*0.62);
+      lx=cx+rLabel*Math.cos(Math.PI/180*mid);
+      ly=cy+rLabel*Math.sin(Math.PI/180*mid);
+      it.push( centerLabel(parent,lay,lx,ly,(cats[i]||("Slice "+(i+1)))+" "+fmtPct(pct,pctDec), basePT, Justification.CENTER_ALIGN) );
+      start=end;
+    }
+    if(asDonut){
+      var rIn = R*(Math.max(5, Math.min(95, innerPct))/100);
+      var hole = addOval(parent, lay, [cy-rIn, cx-rIn, cy+rIn, cx+rIn]); hole.fillColor=paper(); it.push(hole);
+    }
+    return it;
+  }
+
+  function drawColumns(parent, lay, b, data, sws, basePT, showValues, valDec){
+    var pad=8, t=b[0]+pad+10, l=b[1]+pad, bt=b[2]-pad-12, r=b[3]-pad, W=r-l, H=bt-t;
+    var cats=data.categories, S=data.series, names=data.seriesNames, sCnt=S.length, cCnt=cats.length, max=0,i,s;
+    for(s=0;s<sCnt;s++) for(i=0;i<cCnt;i++) if(S[s][i]>max) max=S[s][i]; max=niceMax(max);
+
+    var it = legendRow(parent, lay, [b[0],b[1],t,b[3]], names, sws, basePT);
+    var span=W/cCnt, clu=span*0.8, cw=(clu/sCnt)*0.9, left,x,h,off=Math.max(4,H*0.02);
+
+    for(i=0;i<cCnt;i++){
+      left=l+i*span+(span-clu)/2;
+      for(s=0;s<sCnt;s++){
+        h=(S[s][i]/max)*H; x=left+s*(clu/sCnt)+((clu/sCnt)-cw)/2;
+        var rct=addRect(parent,lay,[bt-h,x,bt,x+cw]); rct.fillColor=sws[s%sws.length];
+        if(showValues) it.push( centerLabel(parent,lay, x+cw/2, bt-h-off, fmtNum(S[s][i],valDec), basePT, Justification.CENTER_ALIGN) );
+      }
+      it.push( centerLabel(parent,lay, left+clu/2, bt+8, String(cats[i]), basePT, Justification.CENTER_ALIGN) );
+    }
+    return it;
+  }
+
+  function drawBars(parent, lay, b, data, sws, basePT, showValues, valDec){
+    var pad=8, t=b[0]+pad+10, l=b[1]+pad+4, bt=b[2]-pad, r=b[3]-pad-4, W=r-l, H=bt-t;
+    var cats=data.categories, S=data.series, names=data.seriesNames, sCnt=S.length, cCnt=cats.length, max=0,i,s;
+    for(s=0;s<sCnt;s++) for(i=0;i<cCnt;i++) if(S[s][i]>max) max=S[s][i]; max=niceMax(max);
+
+    var it = legendRow(parent, lay, [b[0],b[1],t,b[3]], names, sws, basePT);
+    var span=H/cCnt, clu=span*0.8, bh=(clu/sCnt)*0.9, top,y0,w,off=Math.max(4,W*0.02);
+
+    for(i=0;i<cCnt;i++){
+      top=t+i*span+(span-clu)/2;
+      for(s=0;s<sCnt;s++){
+        w=(S[s][i]/max)*W; y0=top+s*(clu/sCnt)+((clu/sCnt)-bh)/2;
+        var rct=addRect(parent,lay,[y0,l,y0+bh,l+w]); rct.fillColor=sws[s%sws.length];
+        if(showValues) it.push( leftLabel(parent,lay, l+w+off, y0+bh/2, fmtNum(S[s][i],valDec), basePT) );
+      }
+      var cat=leftLabel(parent,lay, r-4, top+clu/2, String(cats[i]), basePT);
+      var bb=cat.geometricBounds, wcat=bb[3]-bb[1]; cat.geometricBounds=[bb[0], r-4-wcat, bb[2], r-4]; it.push(cat);
+    }
+    return it;
+  }
+
+  // -------------------- UI (compact) --------------------
+  var dlg = new Window("dialog","INWIZ Graph – TightFit Pro");
+  dlg.orientation="column"; dlg.alignChildren="fill"; dlg.margins=10;
+
+  var row1 = dlg.add("group"); row1.add("statictext",undefined,"Type:");
+  var ddType = row1.add("dropdownlist",undefined,["Pie","Donut","Column","Bar"]); ddType.selection=1;
+
+  var row2 = dlg.add("group"); row2.orientation="row";
+  var cbDelete = row2.add("checkbox",undefined,"Delete selection after draw"); cbDelete.value=true;
+  var cbValues = row2.add("checkbox",undefined,"Show values (bar/column)"); cbValues.value=true;
+
+  var row3 = dlg.add("group"); row3.orientation="row";
+  row3.add("statictext",undefined,"Donut inner %:");
+  var etDonut = row3.add("edittext",undefined,"55"); etDonut.characters=4;
+  row3.add("statictext",undefined,"Start angle:");
+  var etStart = row3.add("edittext",undefined,"-90"); etStart.characters=5;
+
+  var row4 = dlg.add("group"); row4.orientation="row";
+  row4.add("statictext",undefined,"Percent decimals:");
+  var etPctDec = row4.add("edittext",undefined,"1"); etPctDec.characters=2;
+  row4.add("statictext",undefined,"Value decimals:");
+  var etValDec = row4.add("edittext",undefined,"0"); etValDec.characters=2;
+
+  var row5 = dlg.add("group"); row5.orientation="row";
+  var bPaste = row5.add("button",undefined,"Paste CSV…");
+  var bSamplePie = row5.add("button",undefined,"Sample Pie");
+  var bSampleBC  = row5.add("button",undefined,"Sample Bars/Cols");
+
+  var row6 = dlg.add("group"); row6.alignment="right";
+  row6.add("button",undefined,"Cancel");
+  var bOK = row6.add("button",undefined,"Generate");
+
+  var dataCSV = DEFAULT_DATA_PIE;
+  function syncType(){
+    var t = ddType.selection.text;
+    var donutControls = (t==="Donut");
+    etDonut.enabled = donutControls;
+    etStart.enabled = (t==="Pie"||t==="Donut");
+    cbValues.enabled = (t==="Column"||t==="Bar");
+    if(t==="Pie" || t==="Donut") dataCSV = DEFAULT_DATA_PIE;
+    else dataCSV = DEFAULT_DATA_BC;
+  }
+  ddType.onChange = syncType; syncType();
+
+  bSamplePie.onClick = function(){ dataCSV = DEFAULT_DATA_PIE; };
+  bSampleBC.onClick  = function(){ dataCSV = DEFAULT_DATA_BC;  };
+  bPaste.onClick = function(){
+    var w=new Window("dialog","Paste CSV");
+    var ed=w.add("edittext",undefined,dataCSV,{multiline:true,scrollable:true}); ed.preferredSize=[540,260];
+    var g=w.add("group"); g.alignment="right"; g.add("button",undefined,"Cancel"); var ok=g.add("button",undefined,"OK");
+    if(w.show()==1) dataCSV = ed.text;
+  };
+
+  if(dlg.show()!=1) return;
+
+  // collect
+  var chartType = ddType.selection.text;
+  var showValues = cbValues.value;
+  var deleteSelection = cbDelete.value;
+  var donutInner = parseFloat(TRIM(etDonut.text)); if(isNaN(donutInner)) donutInner=55;
+  var startAngle = parseFloat(TRIM(etStart.text)); if(isNaN(startAngle)) startAngle=-90;
+  var pctDec = Math.max(0, parseInt(TRIM(etPctDec.text),10)); if(isNaN(pctDec)) pctDec=1;
+  var valDec = Math.max(0, parseInt(TRIM(etValDec.text),10)); if(isNaN(valDec)) valDec=0;
+
+  // bounds + responsive font size
+  var sel = selectionInfo(), B = sel.bounds, selItem = sel.item;
+  var W=B[3]-B[1], H=B[2]-B[0], scale=Math.min(W/350, H/250); if(!isFinite(scale)||scale<=0) scale=1;
+  var BASE_PT = Math.max(5, Math.min(12, 7*scale));
+
+  var lay = ensureLayer(), sws = palette(), parent = activePage(), data;
+  try { data = csvToData(dataCSV); } catch(e){ alert("Data error: "+e.message); return; }
+
+  try{
+    app.doScript(function(){
+      var items=[];
+      if(chartType==="Pie"){
+        items = drawPieOrDonut(parent, lay, B, data, sws, false, 0, startAngle, BASE_PT, pctDec);
+      }else if(chartType==="Donut"){
+        items = drawPieOrDonut(parent, lay, B, data, sws, true, donutInner, startAngle, BASE_PT, pctDec);
+      }else if(chartType==="Column"){
+        items = drawColumns(parent, lay, B, data, sws, BASE_PT, showValues, valDec);
+      }else if(chartType==="Bar"){
+        items = drawBars(parent, lay, B, data, sws, BASE_PT, showValues, valDec);
+      }else{
+        throw Error("Unknown chart type: "+chartType);
+      }
+      if(!items.length) throw Error("Nothing to draw.");
+      var grp = parent.groups.add(items); grp.itemLayer=lay; grp.insertLabel("INWIZ_has","1");
+      deepNoStroke(grp);
+      if(deleteSelection && selItem && selItem.isValid){ try{ selItem.remove(); }catch(_){ } }
+    }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, "INWIZ Graph (TightFit Pro)");
+  }catch(err){ alert("Draw error: "+err.message); }
+})();
