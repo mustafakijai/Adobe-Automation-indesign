@@ -1,0 +1,140 @@
+#target "indesign"
+
+/*
+  INWIZ_Pie_JLL_Compact.jsx
+  - Perfect-circle pie chart (stroke-free)
+  - Uses selection bounds if available; else a default square
+  - Simple CSV input dialog (Label,Value per line or "Label,Value" rows)
+  - JLL brand palette (edit BASE to change colors)
+*/
+
+(function () {
+  if (!app.documents.length) { alert("Open a document first."); return; }
+
+  // ----------- COLORS (JLL) — edit here to change palette -----------
+  var BASE = [
+    [167,143,129],[0,96,118],[72,145,163],[127,72,123],[90,162,104],
+    [101,88,78],[188,117,121],[47,101,55],[174,117,169],[139,151,155]
+  ];
+
+  // ----------- helpers -----------
+  function TRIM(s){return String(s).replace(/^\s+|\s+$/g,"");}
+
+  function ensureLayer(doc){
+    try { var L = doc.layers.itemByName("INWIZ Charts"); L.name; return L; } catch(e){}
+    return doc.layers.add({name:"INWIZ Charts"});
+  }
+  function ensureColor(doc, name, rgb){
+    try { var c = doc.colors.itemByName(name); c.name; return c; } catch(e){}
+    return doc.colors.add({name:name, model:ColorModel.PROCESS, space:ColorSpace.RGB, colorValue:rgb});
+  }
+  function palette(doc){
+    var out=[], i; for(i=0;i<BASE.length;i++) out.push(ensureColor(doc, "INWIZ-"+(i+1), BASE[i])); return out;
+  }
+  function getParent(){
+    var w = app.activeWindow;
+    return (w && (w.activePage || w.activeSpread)) || app.activeDocument.pages[0];
+  }
+  function selectionSquareBounds(){
+    var s = app.selection, b;
+    if (s.length && s[0].hasOwnProperty("geometricBounds")) {
+      b = s[0].geometricBounds.slice(0);
+    } else {
+      b = [72,72,360,360]; // default square
+    }
+    // force square around center
+    var t=b[0], l=b[1], bt=b[2], r=b[3];
+    var w = r-l, h = bt-t, side = Math.min(w,h);
+    var cx = (l+r)/2, cy = (t+bt)/2;
+    return [cy-side/2, cx-side/2, cy+side/2, cx+side/2];
+  }
+  function styleText(tf, size){
+    try{ tf.texts[0].appliedFont = "Source Sans Pro\tLight"; }
+    catch(_){ try{ tf.texts[0].appliedFont="Source Sans Pro\tRegular"; }catch(__){ try{ tf.texts[0].appliedFont="Minion Pro\tRegular"; }catch(___){} } }
+    try{ tf.texts[0].pointSize = size; }catch(_){}
+    try{ tf.texts[0].justification = Justification.CENTER_ALIGN; }catch(_){}
+  }
+
+  // CSV → [{label:"A", value:10}, ...]
+  function parseCSV(s){
+    var lines = String(s||"").replace(/\r/g,"\n").split(/\n+/), i, out=[];
+    for(i=0;i<lines.length;i++){
+      var L = TRIM(lines[i]); if(!L) continue;
+      var parts = L.split(",");
+      if (parts.length>=2) {
+        var lab = TRIM(parts[0]);
+        var val = parseFloat(TRIM(parts[1])); if(isNaN(val)) val = 0;
+        out.push({label: lab, value: Math.max(0,val)});
+      } else {
+        // allow "Label 10" (space separated)
+        var m = L.match(/^(.*?)[,\s]+(-?\d+(\.\d+)?)$/);
+        if(m){ out.push({label: TRIM(m[1]), value: Math.max(0,parseFloat(m[2]))}); }
+      }
+    }
+    if (!out.length) out = [{label:"A",value:10},{label:"B",value:20},{label:"C",value:30},{label:"D",value:40}];
+    return out;
+  }
+
+  // ----------- PIE drawing (perfect circle via dense arc points) -----------
+  function drawPie(parent, layer, bounds, rows, sws){
+    var items=[], i;
+    var cx=(bounds[1]+bounds[3])/2, cy=(bounds[0]+bounds[2])/2;
+    var R = Math.min(bounds[3]-bounds[1], bounds[2]-bounds[0]) * 0.48; // margin
+    var total=0; for(i=0;i<rows.length;i++) total += Math.max(0, rows[i].value);
+    if (total<=0) total=1;
+
+    var start=-90;
+    function rad(d){return (Math.PI/180)*d;}
+    function arcPoints(cx,cy,rr,a0,a1){
+      var steps=Math.max(48,Math.round((a1-a0)/3)); // dense points → smooth circle
+      var pts=[[cx,cy]], k, ang;
+      for(k=0;k<=steps;k++){ ang=a0+(a1-a0)*(k/steps); pts.push([cx+rr*Math.cos(rad(ang)), cy+rr*Math.sin(rad(ang))]); }
+      pts.push([cx,cy]);
+      return pts;
+    }
+
+    for(i=0;i<rows.length;i++){
+      var pct = (rows[i].value/total)*100;
+      var end = start + (pct/100)*360;
+
+      // slice
+      var poly = parent.polygons.add(layer, {});
+      poly.strokeWeight = 0;
+      poly.paths[0].entirePath = arcPoints(cx,cy,R,start,end);
+      poly.fillColor = sws[i % sws.length];
+      items.push(poly);
+
+      // label
+      var mid = (start+end)/2;
+      var lx = cx + (R*0.70)*Math.cos(rad(mid));
+      var ly = cy + (R*0.70)*Math.sin(rad(mid));
+      var tf = parent.textFrames.add(layer, {geometricBounds:[ly-8,lx-60,ly+8,lx+60], contents: rows[i].label + " — " + Math.round(pct) + "%"});
+      styleText(tf,9);
+      items.push(tf);
+
+      start=end;
+    }
+    return items;
+  }
+
+  // ----------- tiny dialog -----------
+  var dlg = new Window("dialog","Pie Chart (JLL)"); dlg.alignChildren="fill";
+  var info = dlg.add("statictext", undefined, "Paste CSV as: Label,Value (one row per slice)"); info.characters = 45;
+  var ed = dlg.add("edittext", undefined, "Retail,35\nOffice,25\nHospitality,20\nIndustrial,20", {multiline:true, scrolling:true});
+  ed.preferredSize = [420, 180];
+  var btns = dlg.add("group"); btns.alignment="right";
+  btns.add("button", undefined, "Cancel");
+  var ok = btns.add("button", undefined, "Draw");
+
+  if (dlg.show() != 1) return;
+
+  var rows = parseCSV(ed.text);
+  var doc = app.activeDocument, lay = ensureLayer(doc), sws = palette(doc), parent = getParent();
+  var b = selectionSquareBounds();
+
+  app.doScript(function(){
+    var pieces = drawPie(parent, lay, b, rows, sws);
+    var grp = parent.groups.add(pieces); grp.itemLayer = lay;
+  }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, "INWIZ Pie");
+
+})();
