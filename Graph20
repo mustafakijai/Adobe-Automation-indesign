@@ -1,0 +1,372 @@
+#target "indesign"
+#targetengine "session"
+
+/*
+  INWIZ_Graph_JLL_v7.jsx
+  • Text: Source Sans Pro Light, 7 pt, tight frames (cap-height baseline)
+  • Labels positioned close to shapes (small offsets)
+  • Stroke removed from EVERYTHING (creation + deep sweep)
+  • JLL palette
+  • Placement: Fit Selection / Fixed 350×250 (default) / 30% of page
+*/
+
+(function () {
+  if (!app.documents.length) { alert("Open a document first."); return; }
+
+  // ====== helpers ======
+  function TRIM(s){return String(s).replace(/^\s+|\s+$/g,"");}
+  function pctNum(s,fb){var v=parseFloat(TRIM(String(s||"").replace("%","")));if(isNaN(v))v=fb; if(v<1)v=1; if(v>100)v=100; return v;}
+  function niceMax(v){ if(v<=0) return 1; var p=Math.pow(10,Math.floor(Math.log(v)/Math.LN10)); var n=Math.ceil(v/p),a=[1,2,5,10]; for(var i=0;i<a.length;i++) if(n<=a[i]) return a[i]*p; return 10*p; }
+  function activePage(){var w=app.layoutWindows.length?app.layoutWindows[0]:null; return (w && w.activePage) ? w.activePage : app.activeDocument.pages[0];}
+  function selectionBoundsOrNull(){var s=app.selection; if(s.length && s[0].hasOwnProperty("geometricBounds")) return s[0].geometricBounds; return null;}
+  function fixedCenteredBoundsOnPage(w,h){var pb=activePage().bounds, cx=(pb[1]+pb[3])/2, cy=(pb[0]+pb[2])/2; return [cy-h/2, cx-w/2, cy+h/2, cx+w/2];}
+  function pagePercentBounds(pctW,pctH){var pb=activePage().bounds, W=pb[3]-pb[1], H=pb[2]-pb[0]; var w=W*(pctW/100), h=H*(pctH/100); return fixedCenteredBoundsOnPage(w,h);}
+  function squareInside(b){var t=b[0],l=b[1],bt=b[2],r=b[3],W=r-l,H=bt-t,S=Math.min(W,H),cx=(l+r)/2,cy=(t+bt)/2; return [cy-S/2,cx-S/2,cy+S/2,cx+S/2];}
+
+  // ====== layer & swatches ======
+  function ensureLayer(doc){try{var L=doc.layers.itemByName("INWIZ Charts"); L.name; return L;}catch(e){} return doc.layers.add({name:"INWIZ Charts"});}
+  function noneSwatch(doc){try{return doc.swatches.itemByName("None");}catch(e){} return doc.swatches.item(2);}
+  function paperSwatch(doc){try{return doc.swatches.itemByName("Paper");}catch(e){} return doc.swatches.item(0);}
+  function ensureColorUpdate(doc,name,rgb,force){
+    try{var c=doc.colors.itemByName(name); c.name; if(force){c.space=ColorSpace.RGB; c.model=ColorModel.PROCESS; c.colorValue=rgb;} return c;}
+    catch(e){return doc.colors.add({name:name,space:ColorSpace.RGB,model:ColorModel.PROCESS,colorValue:rgb});}
+  }
+
+  // ====== JLL palette (edit here) ======
+  var BASE=[[167,143,129],[0,96,118],[72,145,163],[127,72,123],[90,162,104],[101,88,78],[188,117,121],[47,101,55],[174,117,169],[139,151,155]];
+  function palette(doc,force){var out=[],i; for(i=0;i<BASE.length;i++) out.push(ensureColorUpdate(doc,"INWIZ-"+(i+1),BASE[i],force)); return out;}
+
+  // ====== stroke killers ======
+  function killStroke(o){
+    try{o.strokeWeight=0;}catch(_){}
+    try{o.strokeColor=noneSwatch(app.activeDocument);}catch(_){}
+    try{o.strokeTint=100;}catch(_){}
+    return o;
+  }
+  function stripStrokeDeep(root){
+    var it=root.allPageItems, i;
+    for(i=0;i<it.length;i++){
+      try{it[i].strokeWeight=0;}catch(_){}
+      try{it[i].strokeColor=noneSwatch(app.activeDocument);}catch(_){}
+      try{it[i].strokeTint=100;}catch(_){}
+    }
+    try{root.strokeWeight=0; root.strokeColor=noneSwatch(app.activeDocument);}catch(_){}
+  }
+
+  // ====== primitives ======
+  function addRect(p,lay){var r=p.rectangles.add(); r.itemLayer=lay; return killStroke(r);}
+  function addPoly(p,lay){var g=p.polygons.add(); g.itemLayer=lay; return killStroke(g);}
+  function addOval(p,lay){var o=p.ovals.add(); o.itemLayer=lay; return killStroke(o);}
+  function addText(p,lay){var t=p.textFrames.add(); t.itemLayer=lay; t.textFramePreferences.insetSpacing=[0,0,0,0]; return killStroke(t);}
+
+  // ====== text: 7pt SSP Light + tight fit ======
+  function setFont7(tf, just){
+    try{ tf.texts[0].appliedFont = "Source Sans Pro\tLight"; }
+    catch(_){ try{ tf.texts[0].appliedFont = "Source Sans Pro\tRegular"; }
+      catch(__){ try{ tf.texts[0].appliedFont = "Arial\tRegular"; }catch(___){} } }
+    try{ tf.texts[0].pointSize = 7; }catch(_){}
+    try{ tf.texts[0].justification = just || Justification.CENTER_ALIGN; }catch(_){}
+    // squeeze baseline to remove extra top room
+    try{ tf.textFramePreferences.firstBaselineOffset = FirstBaseline.CAP_HEIGHT; }catch(_){}
+    try{ tf.textFramePreferences.minimumFirstBaselineOffset = 0; }catch(_){}
+  }
+  function tightFit(tf){
+    // turn OFF auto-size to avoid huge boxes, then fit twice
+    try{ tf.textFramePreferences.autoSizingType = AutoSizingTypeEnum.OFF; }catch(_){}
+    try{ tf.parentStory.recompose(); }catch(_){}
+    try{ tf.fit(FitOptions.FRAME_TO_CONTENT); }catch(_){}
+    try{ tf.parentStory.recompose(); }catch(_){}
+    try{ tf.fit(FitOptions.FRAME_TO_CONTENT); }catch(_){}
+  }
+  function labelCenter(p,lay,x,y,txt,just){
+    var tf=addText(p,lay);
+    tf.contents = txt;
+    tf.geometricBounds=[y-3,x-30,y+3,x+30];
+    setFont7(tf, just);
+    tightFit(tf);
+    var b=tf.geometricBounds, w=b[3]-b[1], h=b[2]-b[0];
+    tf.geometricBounds=[y-h/2,x-w/2,y+h/2,x+w/2];
+    return tf;
+  }
+  function labelLeft(p,lay,xLeft,yCenter,txt){
+    var tf=addText(p,lay); tf.contents=txt;
+    tf.geometricBounds=[yCenter-3,xLeft,yCenter+3,xLeft+60];
+    setFont7(tf, Justification.LEFT_ALIGN);
+    tightFit(tf);
+    var b=tf.geometricBounds, w=b[3]-b[1], h=b[2]-b[0];
+    tf.geometricBounds=[yCenter-h/2,xLeft,yCenter+h/2,xLeft+w];
+    return tf;
+  }
+
+  // ====== data ======
+  function csvToData(csv){
+    var lines=String(csv||"").replace(/\r/g,"\n").split(/\n+/), arr=[], i, s;
+    function split(line){ var p=String(line).split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/), k; for(k=0;k<p.length;k++) p[k]=p[k].replace(/^\"|\"$/g,"").replace(/\"\"/g,'"'); return p; }
+    for(i=0;i<lines.length;i++){ s=TRIM(lines[i]); if(s.length) arr.push(split(s)); }
+    if(arr.length<2 || arr[0].length<2) throw Error("Need header + at least 1 row.");
+    var cats=[], names=[], S=[], r,c,v;
+    for(c=1;c<arr[0].length;c++) names.push(arr[0][c]);
+    for(r=1;r<arr.length;r++) cats.push(arr[r][0]);
+    for(c=1;c<arr[0].length;c++){ var col=[]; for(r=1;r<arr.length;r++){ v=parseFloat(TRIM(arr[r][c])); col.push(isNaN(v)?0:v); } S.push(col); }
+    return {categories:cats, seriesNames:names, series:S};
+  }
+
+  // ====== legend ======
+  function legendRow(p,lay,x,y,labels,sws){
+    var it=[], cx=x, gap=10, i;
+    for(i=0;i<labels.length;i++){
+      var chip=addRect(p,lay); chip.geometricBounds=[y,cx,y+8,cx+14]; chip.fillColor=sws[i%sws.length]; it.push(chip);
+      it.push( labelLeft(p,lay,cx+18, y+4, labels[i]) );
+      cx += 18 + (it[it.length-1].geometricBounds[3]-it[it.length-1].geometricBounds[1]) + gap;
+    }
+    return it;
+  }
+
+  // ====== pie / donut ======
+  function arcPoints(cx,cy,r,a0,a1){
+    var RAD=Math.PI/180, steps=Math.max(60, Math.round((a1-a0)/2)), pts=[[cx,cy]], k, ang;
+    for(k=0;k<=steps;k++){ ang=a0+(a1-a0)*(k/steps); pts.push([cx+r*Math.cos(ang*RAD), cy+r*Math.sin(ang*RAD)]); }
+    pts.push([cx,cy]); return pts;
+  }
+  function pieItems(p,lay,b,d,sws,startAngle,labelDist,legendTop){
+    var cats=d.categories, S=d.series, vals=[], i,s;
+    if(S.length===1){ vals=S[0].slice(0); } else { for(i=0;i<cats.length;i++){ var sum=0; for(s=0;s<S.length;s++) sum+=S[s][i]; vals.push(sum); } }
+    var total=0; for(i=0;i<vals.length;i++) total+=Math.max(0,vals[i]); if(total<=0) total=1;
+
+    var cx=(b[1]+b[3])/2, cy=(b[0]+b[2])/2, R=Math.min((b[3]-b[1]),(b[2]-b[0]))*0.48;
+    var it=[], start=isNaN(startAngle)?-90:startAngle, end, pct, mid, lx, ly, off=isNaN(labelDist)?14:labelDist;
+
+    if(legendTop && d.seriesNames && d.seriesNames.length) it=it.concat(legendRow(p,lay,b[1],b[0]-14,d.seriesNames,sws));
+
+    for(i=0;i<vals.length;i++){
+      pct=(vals[i]/total)*100; end=start+(pct/100)*360;
+      var poly=addPoly(p,lay); poly.paths[0].entirePath=arcPoints(cx,cy,R,start,end); poly.fillColor=sws[i%sws.length]; it.push(poly);
+      mid=(start+end)/2;
+      lx=cx+(R+off)*Math.cos(Math.PI/180*mid);
+      ly=cy+(R+off)*Math.sin(Math.PI/180*mid);
+      it.push( labelCenter(p,lay,lx,ly,(cats[i]||("Slice "+(i+1)))+" — "+Math.round(pct)+"%") );
+      start=end;
+    }
+    return it;
+  }
+  function donutItems(p,lay,b,d,sws,startAngle,labelDist,legendTop,innerPct){
+    var it=pieItems(p,lay,b,d,sws,startAngle,labelDist,legendTop);
+    var cx=(b[1]+b[3])/2, cy=(b[0]+b[2])/2, R=Math.min((b[3]-b[1]),(b[2]-b[0]))*0.48;
+    var rInner=R*((isNaN(innerPct)?50:innerPct)/100);
+    var hole=addOval(p,lay); hole.geometricBounds=[cy-rInner, cx-rInner, cy+rInner, cx+rInner]; hole.fillColor=paperSwatch(app.activeDocument);
+    return it.concat(hole);
+  }
+
+  // ====== column / bar (labels tight & close) ======
+  function columnItems(p,lay,b,d,sws,legendTop,colPct,cluPct,showValues){
+    var cats=d.categories, S=d.series, names=d.seriesNames, sCnt=S.length, cCnt=cats.length, i,s,max=0;
+    for(s=0;s<sCnt;s++) for(i=0;i<cCnt;i++) if(S[s][i]>max) max=S[s][i]; max=niceMax(max);
+    var it=[], t=b[0], l=b[1], bt=b[2], r=b[3], W=r-l, H=bt-t;
+    if(legendTop){ it=it.concat(legendRow(p,lay,l,t-14,names,sws)); t+=20; H=bt-t; }
+    var span=W/cCnt, clu=span*(cluPct/100), cw=(clu/sCnt)*(colPct/100), left,x,h,rect,off=6;
+
+    for(i=0;i<cCnt;i++){
+      left=l+i*span+(span-clu)/2;
+      for(s=0;s<sCnt;s++){
+        h=(S[s][i]/max)*H; x=left+s*(clu/sCnt)+((clu/sCnt)-cw)/2;
+        rect=addRect(p,lay); rect.geometricBounds=[bt-h,x,bt,x+cw]; rect.fillColor=sws[s%sws.length]; it.push(rect);
+        if(showValues){ it.push( labelCenter(p,lay, x+cw/2, bt-h-off, String(S[s][i])) ); }
+      }
+      it.push( labelCenter(p,lay, left+clu/2, bt+10, String(cats[i])) );
+    }
+    return it;
+  }
+  function barItems(p,lay,b,d,sws,legendTop,colPct,cluPct,showValues){
+    var cats=d.categories, S=d.series, names=d.seriesNames, sCnt=S.length, cCnt=cats.length, i,s,max=0;
+    for(s=0;s<sCnt;s++) for(i=0;i<cCnt;i++) if(S[s][i]>max) max=S[s][i]; max=niceMax(max);
+    var it=[], t=b[0], l=b[1], bt=b[2], r=b[3], W=r-l, H=bt-t;
+    if(legendTop){ it=it.concat(legendRow(p,lay,l,t-14,names,sws)); t+=20; H=bt-t; }
+    var span=H/cCnt, clu=span*(cluPct/100), bh=(clu/sCnt)*(colPct/100), top,y0,w,rect,off=6;
+
+    for(i=0;i<cCnt;i++){
+      top=t+i*span+(span-clu)/2;
+      for(s=0;s<sCnt;s++){
+        w=(S[s][i]/max)*W; y0=top+s*(clu/sCnt)+((clu/sCnt)-bh)/2;
+        rect=addRect(p,lay); rect.geometricBounds=[y0,l,y0+bh,l+w]; rect.fillColor=sws[s%sws.length]; it.push(rect);
+        if(showValues){ it.push( labelLeft(p,lay, l+w+off, y0+bh/2, String(S[s][i])) ); }
+      }
+      it.push( labelLeft(p,lay, r+6, top+clu/2, String(cats[i])) );
+    }
+    return it;
+  }
+
+  function drawChart(kind, parent, lay, b, d, sws, P){
+    if(kind==="Pie")   return pieItems(parent,lay,squareInside(b),d,sws,P.startAngle,P.labelDist,P.legendTop);
+    if(kind==="Donut") return donutItems(parent,lay,squareInside(b),d,sws,P.startAngle,P.labelDist,P.legendTop,P.donutInner);
+    if(kind==="Column")return columnItems(parent,lay,b,d,sws,P.legendTop,P.colPct,P.cluPct,P.showValues);
+    if(kind==="Bar")   return barItems(parent,lay,b,d,sws,P.legendTop,P.colPct,P.cluPct,P.showValues);
+    throw Error("Unknown chart type");
+  }
+
+  // ====== persist ======
+  var PREF="INWIZ_";
+  function saveCfg(grp,P){ grp.insertLabel(PREF+"has","1"); for(var k in P) if(P.hasOwnProperty(k)) grp.insertLabel(PREF+k,String(P[k])); }
+  function loadCfg(grp){
+    if(grp.extractLabel(PREF+"has")!=="1") return null;
+    function asNum(s,fb){ var n=parseFloat(s); return isNaN(n)?fb:n; }
+    function asBool(s){ s=String(s); return s==="1"||s.toLowerCase()==="true"; }
+    var btxt=grp.extractLabel(PREF+"bounds"), b=btxt?btxt.split(","):null, i; if(b&&b.length===4) for(i=0;i<4;i++) b[i]=parseFloat(b[i]);
+    return {
+      chartType: grp.extractLabel(PREF+"chartType")||"Pie",
+      legendTop: asBool(grp.extractLabel(PREF+"legendTop")||"0"),
+      showValues:asBool(grp.extractLabel(PREF+"showValues")||"0"),
+      colPct:    asNum(grp.extractLabel(PREF+"colPct"),90),
+      cluPct:    asNum(grp.extractLabel(PREF+"cluPct"),80),
+      forceRecolor: asBool(grp.extractLabel(PREF+"forceRecolor")||"1"),
+      startAngle:asNum(grp.extractLabel(PREF+"startAngle"),-90),
+      labelDist: asNum(grp.extractLabel(PREF+"labelDist"),14),
+      donutInner:asNum(grp.extractLabel(PREF+"donutInner"),50),
+      placeMode: grp.extractLabel(PREF+"placeMode")||"FIXED",
+      fixedW:    asNum(grp.extractLabel(PREF+"fixedW"),350),
+      fixedH:    asNum(grp.extractLabel(PREF+"fixedH"),250),
+      percW:     asNum(grp.extractLabel(PREF+"percW"),30),
+      percH:     asNum(grp.extractLabel(PREF+"percH"),30),
+      bounds:    b || grp.geometricBounds,
+      dataText:  grp.extractLabel(PREF+"dataText") || ""
+    };
+  }
+
+  // ====== data dialog ======
+  var dataCSV="";
+  function openDataDialog(initialCSV){
+    var dlg=new Window("dialog","Graph Data"); dlg.orientation="column"; dlg.alignChildren="fill"; dlg.margins=8;
+    dlg.add("statictext",undefined,"Row 0 = series; Col 0 = categories. Numbers only.");
+    var wrap=dlg.add("panel"); wrap.orientation="column"; wrap.alignChildren="left"; wrap.preferredSize.height=260; wrap.margins=6;
+
+    var grid={ rows:10, cols:10, cells:[], firstColW:120, cellW:70 };
+    grid.build=function(){ while(wrap.children.length) wrap.remove(wrap.children[0]); grid.cells=[]; var r,c,row,w,ed;
+      for(r=0;r<this.rows;r++){ row=wrap.add("group"); row.orientation="row"; grid.cells[r]=[];
+        for(c=0;c<this.cols;c++){ w=(c===0)?this.firstColW:this.cellW; ed=row.add("edittext",undefined,"",{characters:Math.round(w/7)}); ed.preferredSize=[w,20]; grid.cells[r][c]=ed; } }
+      dlg.layout.layout(true);
+    };
+    grid.setFromMatrix=function(m){ this.rows=Math.max(2,m.length); this.cols=Math.max(2,(m[0]?m[0].length:2)); this.build(); for(var r=0;r<m.length;r++) for(var c=0;c<m[r].length;c++) this.cells[r][c].text=String(m[r][c]); };
+    grid.toCSV=function(){ var m=[],r,c; for(r=0;r<this.rows;r++){ m[r]=[]; for(c=0;c<this.cols;c++){ var v=String(this.cells[r][c].text||""); if(v.indexOf(",")>=0||v.indexOf('"')>=0) v='"'+v.replace(/"/g,'""')+'"'; m[r].push(v);} } return m.map(function(row){return row.join(",");}).join("\n"); };
+    grid.fromCSV=function(csv){ var lines=String(csv||"").replace(/\r/g,"\n").split(/\n+/).filter(function(s){return TRIM(s).length>0;}); function split(line){ var p=String(line).split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/); for(var i=0;i<p.length;i++) p[i]=p[i].replace(/^\"|\"$/g,"").replace(/\"\"/g,'"'); return p;} if(!lines.length)return; var m=[],i; for(i=0;i<lines.length;i++) m.push(split(lines[i])); this.setFromMatrix(m); };
+
+    var bar=dlg.add("group"); bar.orientation="row";
+    function B(label,fn){ var b=bar.add("button",undefined,label); b.onClick=fn; return b; }
+    B("– Row",function(){ if(grid.rows>2){ grid.rows--; grid.build(); } });
+    B("+ Row",function(){ grid.rows++; grid.build(); });
+    B("– Col",function(){ if(grid.cols>2){ grid.cols--; grid.build(); } });
+    B("+ Col",function(){ grid.cols++; grid.build(); });
+    B("Paste",function(){ var d=new Window("dialog","Paste CSV"); var ed=d.add("edittext",undefined,"",{multiline:true,scrollable:true}); ed.preferredSize=[420,200]; d.add("button",undefined,"Cancel"); var okb=d.add("button",undefined,"OK"); if(d.show()==1){ grid.fromCSV(ed.text); } });
+    B("Copy",function(){ var d=new Window("dialog","Copy CSV"); d.add("edittext",undefined,grid.toCSV(),{multiline:true,readonly:true,scrollable:true}).preferredSize=[420,200]; d.add("button",undefined,"Close"); d.show(); });
+    B("Import",function(){ var f=File.openDialog("CSV"); if(f){ f.open("r"); var s=f.read(); f.close(); grid.fromCSV(s);} });
+    B("Export",function(){ var f=File.saveDialog("Save CSV","CSV:*.csv"); if(f){ f.open("w"); f.write(grid.toCSV()); f.close(); } });
+    B("Sample",function(){ grid.setFromMatrix([["","Series A","Series B","Series C"],["Cat 1","10","20","15"],["Cat 2","30","25","18"],["Cat 3","22","17","29"],["Cat 4","18","34","26"]]); });
+    B("Sample Pie",function(){ grid.setFromMatrix([["","Share"],["Retail","35"],["Office","25"],["Hospitality","20"],["Industrial","20"]]); });
+    B("Clear",function(){ grid.setFromMatrix([["","S1","S2"],["Cat 1","",""],["Cat 2","",""]]); });
+
+    var act=dlg.add("group"); act.alignment="right"; act.add("button",undefined,"Cancel"); var ok=act.add("button",undefined,"OK");
+    grid.build(); if(initialCSV) grid.fromCSV(initialCSV);
+    return (dlg.show()==1) ? grid.toCSV() : null;
+  }
+
+  // ====== panel ======
+  var dataCSV="";
+  var dlg=new Window("dialog","INWIZ Graph (JLL)"); dlg.orientation="column"; dlg.alignChildren="fill"; dlg.margins=10;
+
+  var menu=dlg.add("dropdownlist",undefined,["Graph Options ▾","Edit Data…","Sample Data","Sample Pie","Clear Data","Import CSV…","Export CSV…"]); menu.selection=0;
+  menu.onChange=function(){
+    if(menu.selection.index<=0){menu.selection=0;return;}
+    var idx=menu.selection.index, f;
+    if(idx===1){ var n=openDataDialog(dataCSV); if(n!==null) dataCSV=n; }
+    if(idx===2){ dataCSV=",Series A,Series B,Series C\nCat 1,10,20,15\nCat 2,30,25,18\nCat 3,22,17,29\nCat 4,18,34,26"; }
+    if(idx===3){ dataCSV=",Share\nRetail,35\nOffice,25\nHospitality,20\nIndustrial,20"; }
+    if(idx===4){ dataCSV=""; }
+    if(idx===5){ f=File.openDialog("CSV"); if(f){ f.open("r"); dataCSV=f.read(); f.close(); } }
+    if(idx===6){ f=File.saveDialog("Save CSV","CSV:*.csv"); if(f){ f.open("w"); f.write(dataCSV||""); f.close(); } }
+    menu.selection=0;
+  };
+
+  var typeP=dlg.add("panel",undefined,"Type & Palette"); typeP.alignChildren="left"; typeP.margins=8;
+  var row=typeP.add("group"); row.orientation="row"; row.spacing=10;
+  var types=["Pie","Donut","Column","Bar"], rb=[], i; for(i=0;i<types.length;i++){ rb[i]=row.add("radiobutton",undefined,types[i]); rb[i].size=[90,18]; } rb[0].value=true;
+  var ckForce=typeP.add("checkbox",undefined,"Force Recolor INWIZ swatches"); ckForce.value=true;
+
+  var optP=dlg.add("panel",undefined,"Options"); optP.alignChildren="left"; optP.margins=8;
+  var g1=optP.add("group"); g1.add("statictext",undefined,"Legend on Top:"); var ckLegend=g1.add("checkbox",undefined,"");
+  var g3=optP.add("group"); g3.add("statictext",undefined,"Pie Start Angle:"); var etAng=g3.add("edittext",undefined,"-90"); etAng.characters=5;
+  var g4=optP.add("group"); g4.add("statictext",undefined,"Pie Label Distance:"); var etLbl=g4.add("edittext",undefined,"14"); etLbl.characters=5;
+  var g5=optP.add("group"); g5.add("statictext",undefined,"Donut Inner %:"); var etDon=g5.add("edittext",undefined,"50%"); etDon.characters=5;
+  var gBar=optP.add("group"); gBar.add("statictext",undefined,"Show Values (bar/column):"); var ckValues=gBar.add("checkbox",undefined,"");
+
+  var placeP=dlg.add("panel",undefined,"Placement"); placeP.alignChildren="left"; placeP.margins=8;
+  var rgrp=placeP.add("group"); rgrp.orientation="row";
+  var rbFit=rgrp.add("radiobutton",undefined,"Fit Selection");
+  var rbFixed=rgrp.add("radiobutton",undefined,"Fixed 350×250 (pt)");
+  var rbPerc=rgrp.add("radiobutton",undefined,"30% of Page");
+  rbFixed.value=true;
+  var etW=placeP.add("edittext",undefined,"350"); etW.characters=6;
+  var etH=placeP.add("edittext",undefined,"250"); etH.characters=6;
+  var percG=placeP.add("group"); percG.add("statictext",undefined,"Percent W×H:"); var etPW=percG.add("edittext",undefined,"30"); etPW.characters=4; var etPH=percG.add("edittext",undefined,"30"); etPH.characters=4;
+
+  function currentType(){ for(i=0;i<rb.length;i++) if(rb[i].value) return rb[i].text; return "Pie"; }
+  function placeMode(){ if(rbFit.value) return "FIT"; if(rbPerc.value) return "PERCENT"; return "FIXED"; }
+  function collect(){
+    var pm=placeMode(), b=null;
+    if(pm==="FIT"){ b=selectionBoundsOrNull(); if(!b) pm="FIXED"; }
+    if(pm==="FIXED"){ var fw=parseFloat(TRIM(etW.text)); if(isNaN(fw)) fw=350; var fh=parseFloat(TRIM(etH.text)); if(isNaN(fh)) fh=250; b=fixedCenteredBoundsOnPage(fw,fh); }
+    if(pm==="PERCENT"){ var pw=parseFloat(TRIM(etPW.text)); if(isNaN(pw)) pw=30; var ph=parseFloat(TRIM(etPH.text)); if(isNaN(ph)) ph=30; b=pagePercentBounds(pw,ph); }
+    return {
+      chartType: currentType(),
+      legendTop: ckLegend.value,
+      colPct: 90, cluPct: 80, showValues: ckValues.value,
+      forceRecolor: ckForce.value,
+      startAngle: (function(){var v=parseFloat(TRIM(etAng.text)); return isNaN(v)?-90:v;})(),
+      labelDist: (function(){var v=parseFloat(TRIM(etLbl.text)); return isNaN(v)?14:v;})(),
+      donutInner: pctNum(etDon.text,50),
+      placeMode: pm, fixedW: parseFloat(TRIM(etW.text))||350, fixedH: parseFloat(TRIM(etH.text))||250,
+      percW: parseFloat(TRIM(etPW.text))||30, percH: parseFloat(TRIM(etPH.text))||30,
+      bounds: b,
+      dataText: dataCSV || ",Series A,Series B\nCat 1,10,20\nCat 2,30,25"
+    };
+  }
+
+  var P=null, action=null;
+  var act=dlg.add("group"); act.alignment="right";
+  act.add("button",undefined,"Cancel");
+  var previewBtn=act.add("button",undefined,"Preview");
+  var okBtn=act.add("button",undefined,"Generate/Update");
+  previewBtn.onClick=function(){ P=collect(); action="preview"; dlg.close(1); };
+  okBtn.onClick=function(){ P=collect(); action="generate"; dlg.close(1); };
+
+  if(dlg.show()!=1) return;
+  if(!P){ alert("No parameters collected."); return; }
+
+  // ====== draw ======
+  var doc=app.activeDocument, lay=ensureLayer(doc), sws=palette(doc,P.forceRecolor), parent=activePage(), data;
+  try{ data=csvToData(P.dataText); }catch(e){ alert("Data error: "+e.message); return; }
+
+  function draw(kind,b){
+    if(kind==="Pie")   return pieItems(parent,lay,squareInside(b),data,sws,P.startAngle,P.labelDist,P.legendTop);
+    if(kind==="Donut") return donutItems(parent,lay,squareInside(b),data,sws,P.startAngle,P.labelDist,P.legendTop,P.donutInner);
+    if(kind==="Column")return columnItems(parent,lay,b,data,sws,P.legendTop,P.colPct,P.cluPct,P.showValues);
+    if(kind==="Bar")   return barItems(parent,lay,b,data,sws,P.legendTop,P.colPct,P.cluPct,P.showValues);
+    throw Error("Unknown chart type");
+  }
+
+  try{
+    app.doScript(function(){
+      var grp=null, items, b=P.bounds.slice(0);
+      if(action==="generate" && app.selection.length && app.selection[0].extractLabel && app.selection[0].extractLabel("INWIZ_has")==="1"){
+        grp=app.selection[0];
+        P.bounds=grp.geometricBounds;
+        while(grp.allPageItems.length){ try{ grp.allPageItems[0].remove(); }catch(_){ break; } }
+        items=draw(P.chartType,P.bounds.slice(0));
+        for(var ii=0; ii<items.length; ii++){ try{ items[ii].move(grp, LocationOptions.AT_END); }catch(__){} }
+        saveCfg(grp,P); stripStrokeDeep(grp);
+      }else{
+        items=draw(P.chartType,b);
+        grp=parent.groups.add(items); grp.itemLayer=lay; saveCfg(grp,P); stripStrokeDeep(grp);
+      }
+    }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, "INWIZ Draw");
+  }catch(err){ alert("Draw error: "+err.message); }
+
+  try{ app.redraw(); }catch(_){}
+})();
