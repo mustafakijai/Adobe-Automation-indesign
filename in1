@@ -1,0 +1,120 @@
+/** — Compact + Progress (2 Tabs, Custom BG, Quote Footer)
+ *  InDesign 2022–2025
+ *  - Word(.docx/.txt/.rtf) → can pick FILE or FOLDER
+ *  - Excel folder → labeled text frames (tables)
+ *  - Images / Icons → labeled graphic frames
+ *  - Auto-flow overset text
+ *  - Exports: Print PDF, Digital PDF, Package
+ *  - Progress bar + quote footer
+ *  Copyright Mustafa Khan
+ */
+
+#target indesign
+(function () {
+
+// ====== THEME ======
+var PANEL_BG = [0.10, 0.14, 0.18, 1];
+var LOGO_PATH = "/Users/mustafa.khan/Desktop/logo.png";
+var HOME_JSX_PATH = "/Users/mustafa.khan/Desktop/HomePanel.jsx";
+
+// ------- STATE -------
+var PATHS = { wordOrTextFile:null, excelFolder:null, imageFolder:null, iconFolder:null, outputFolder:null };
+var SIMPLE = { folder:null, templates:[], selectedIndex:0 };
+var CATS = ["Brochure","Social Tile","Flyer","One-Pager","Report","Other"];
+var CATDATA = {}; for (var i=0;i<CATS.length;i++) CATDATA[CATS[i]] = { folder:null, templates:[] };
+
+// ====== HELPERS ======
+function row(p, label, btnText, handler, lw, bw){
+  var g = p.add('group'); g.orientation='row'; g.spacing=6;
+  var s = g.add('statictext', undefined, label); s.preferredSize=[lw||130,16];
+  var b = g.add('button', undefined, btnText||'Select'); b.preferredSize=[bw||110,22]; b.onClick = handler;
+  return {group:g, label:s, button:b};
+}
+function divider(p){ p.add('panel', [0,0,400,1]); }
+
+// helper: pick best file from folder
+function __resolveWordFromFolder(folderObj){
+  var fo = (folderObj instanceof Folder) ? folderObj : new Folder(String(folderObj));
+  if (!fo.exists) return null;
+  var arr = fo.getFiles(function(x){ return x instanceof File && /\.(docx|txt|rtf)$/i.test(x.name); });
+  if (!arr.length) return null;
+  function extRank(n){ return /\.docx$/i.test(n)?0 : (/\.txt$/i.test(n)?1:2); }
+  arr.sort(function(a,b){
+    var ra = extRank(a.name), rb = extRank(b.name);
+    if (ra !== rb) return ra - rb;
+    return b.modified - a.modified; // newest first
+  });
+  return arr[0];
+}
+
+// file OR folder picker
+function selectWordOrFolder(){
+  var f = File.openDialog("Select Word/TXT/RTF file OR choose a folder", function(ff){
+    return ff instanceof File && /\.(docx|txt|rtf)$/i.test(ff.name);
+  });
+  if (f) return f.fsName; // file picked
+  var fo = Folder.selectDialog("Or pick a folder containing Word/TXT/RTF");
+  if (!fo) return null;
+  var best = __resolveWordFromFolder(fo);
+  if (!best){ alert("No .docx/.txt/.rtf in: " + fo.fsName); return null; }
+  return best.fsName;
+}
+
+// ====== WINDOW ======
+var w = new Window('palette', 'Inwiz — Compact', undefined, {resizeable: true});
+w.alignChildren = ['fill','top']; w.margins = 6; w.spacing = 6;
+w.graphics.backgroundColor = w.graphics.newBrush(w.graphics.BrushType.SOLID_COLOR, PANEL_BG);
+
+// --- Tabs ---
+var tabs = w.add('tabbedpanel'); tabs.minimumSize.height = 300;
+
+// --- SIMPLE TAB ---
+var tS = tabs.add('tab', undefined, 'Simple'); tS.margins=6; tS.spacing=6;
+
+row(tS,'Template Folder:','Select',function(){
+  var f = Folder.selectDialog("Pick template folder"); if (!f) return;
+  SIMPLE.folder=f.fsName; SIMPLE.templates=scanIndd(f);
+});
+
+divider(tS);
+row(tS,'Text/Word File:','Select',function(){
+  var sel = selectWordOrFolder();
+  if (sel) PATHS.wordOrTextFile = sel;
+});
+row(tS,'Excel Folder:','Select',function(){ var f=Folder.selectDialog("Excel folder"); if(f) PATHS.excelFolder=f.fsName; });
+row(tS,'Image Folder:','Select',function(){ var f=Folder.selectDialog("Images folder"); if(f) PATHS.imageFolder=f.fsName; });
+row(tS,'Icon Folder:','Select',function(){ var f=Folder.selectDialog("Icons folder"); if(f) PATHS.iconFolder=f.fsName; });
+row(tS,'Output Folder:','Select',function(){ var f=Folder.selectDialog("Output folder"); if(f) PATHS.outputFolder=f.fsName; });
+
+// --- CATEGORY TAB ---
+var tC = tabs.add('tab', undefined, 'Category'); tC.margins=6; tC.spacing=6;
+
+for (var ci=0; ci<CATS.length; ci++){
+  (function(name){
+    row(tC,name+' Folder:','Select',function(){
+      var f=Folder.selectDialog("Pick folder for "+name); if(f){ CATDATA[name].folder=f.fsName; }
+    });
+  })(CATS[ci]);
+}
+
+divider(tC);
+row(tC,'Text/Word File:','Select',function(){
+  var sel = selectWordOrFolder();
+  if (sel) PATHS.wordOrTextFile = sel;
+});
+row(tC,'Excel Folder:','Select',function(){ var f=Folder.selectDialog("Excel folder"); if(f) PATHS.excelFolder=f.fsName; });
+row(tC,'Image Folder:','Select',function(){ var f=Folder.selectDialog("Images folder"); if(f) PATHS.imageFolder=f.fsName; });
+row(tC,'Icon Folder:','Select',function(){ var f=Folder.selectDialog("Icons folder"); if(f) PATHS.iconFolder=f.fsName; });
+row(tC,'Output Folder:','Select',function(){ var f=Folder.selectDialog("Output folder"); if(f) PATHS.outputFolder=f.fsName; });
+
+// --- Run + Progress ---
+var gRun = w.add('group');
+var btnGen = gRun.add('button', undefined, 'Generate');
+var pb = w.add('progressbar', undefined, 0, 100); pb.preferredSize=[300,12];
+
+w.center(); w.show();
+
+// ========== HELPER FUNCS (scanners, autoflow, exports etc.)
+// (keep your existing scanIndd, autoFlowAll, importDocx, placeExcel, etc… unchanged)
+
+})();
