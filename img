@@ -1,0 +1,190 @@
+/* INWIZ_ImageFolderReplace_All.jsx
+   Mustafa — rock-solid image replacer
+   - Works on all pages (or selection only)
+   - Matches: Label → existing link base → Sequential
+   - Handles empty shapes (Rect/Oval/Polygon) if enabled
+   - Unlocks items/layers, works in groups/anchors
+   - Fit: Fill / Fit / Content→Frame / Frame→Content / Content-Aware
+*/
+
+#target "indesign"
+
+(function () {
+  if (!app.documents.length) { alert("Open a document first."); return; }
+  var doc = app.activeDocument;
+
+  // ---------- UI ----------
+  var w = new Window('dialog', 'INWIZ — Replace From Folder'); w.orientation='column'; w.alignChildren='fill';
+  var g1 = w.add('group'); g1.add('statictext', undefined, 'Images Folder:'); 
+  var pathTxt = g1.add('edittext', undefined, ''); pathTxt.characters=45;
+  var pickBtn = g1.add('button', undefined, 'Browse…');
+  var g2 = w.add('group'); g2.orientation='row'; g2.alignChildren='left';
+  var selOnly = g2.add('checkbox', undefined, 'Selection only'); selOnly.value = (app.selection && app.selection.length>0);
+  var incEmpty = g2.add('checkbox', undefined, 'Include empty shapes'); incEmpty.value = true;
+
+  var g3 = w.add('panel', undefined, 'Matching'); g3.orientation='column'; g3.alignChildren='left'; g3.margins=10; 
+  var m1 = g3.add('checkbox', undefined, 'Match by frame label'); m1.value = true;
+  var m2 = g3.add('checkbox', undefined, 'Then by existing link base name'); m2.value = true;
+  var m3 = g3.add('statictext', undefined, 'Fallback: sequential (no repeats until cycle ends)');
+
+  var g4 = w.add('panel', undefined, 'Fit'); g4.orientation='row'; g4.alignChildren='left'; g4.margins=10; 
+  var fitList = g4.add('dropdownlist', undefined, ['Fill Proportionally','Fit Proportionally','Content→Frame','Frame→Content','Content-Aware']);
+  fitList.selection = 0;
+
+  var g5 = w.add('group'); g5.alignment='fill';
+  var ok = g5.add('button', undefined, 'Run', {name:'ok'});
+  var cancel = g5.add('button', undefined, 'Cancel', {name:'cancel'});
+
+  pickBtn.onClick = function(){
+    var f = Folder.selectDialog("Pick folder with images");
+    if (f) pathTxt.text = File.decode(f.fsName);
+  };
+
+  if (w.show() != 1) return;
+
+  var IMG_FOLDER = (pathTxt.text && pathTxt.text.length) ? new Folder(pathTxt.text) : null;
+  if (!IMG_FOLDER || !IMG_FOLDER.exists) { alert("Please choose a valid Images Folder."); return; }
+
+  // ---------- Helpers ----------
+  var IMG_RX = /\.(jpg|jpeg|png|tif|tiff|gif|bmp|psd|ai|eps|pdf)$/i;
+
+  function listImageFiles(folder){
+    return folder.getFiles(function(f){ return (f instanceof File) && IMG_RX.test(f.name); });
+  }
+  function basenameNoExt(n){
+    return String(n||"").replace(/\.[^\.]+$/,'').toLowerCase();
+  }
+  function isPlacedGraphic(it){
+    try{ return (it.allGraphics && it.allGraphics.length > 0); }catch(_){ return false; }
+  }
+  function isShape(it){
+    try{ var n = it && it.constructor ? it.constructor.name : ""; return /Rectangle|Polygon|Oval/.test(n); }catch(_){ return false; }
+  }
+  function canAcceptGraphic(it){
+    if (isPlacedGraphic(it)) return true;
+    if (isShape(it)) return true;
+    return false;
+  }
+  function unlockForEdit(item){
+    try{ if(item.locked) item.locked=false; }catch(_){}
+    try{ if(item.parent && item.parent.locked) item.parent.locked=false; }catch(_){}
+    try{ if(item.itemLayer && item.itemLayer.locked) item.itemLayer.locked=false; }catch(_){}
+    try{ if(item.visible===false) item.visible=true; }catch(_){}
+    return item;
+  }
+  function fitGraphic(frame, fitIdx){
+    try{
+      if (fitIdx === 4){ try{ frame.fit(FitOptions.CONTENT_AWARE_FIT); return; }catch(_){ /* fallback below */ } }
+      if (fitIdx === 0) frame.fit(FitOptions.FILL_PROPORTIONALLY);
+      else if (fitIdx === 1) frame.fit(FitOptions.PROPORTIONALLY);
+      else if (fitIdx === 2) frame.fit(FitOptions.CONTENT_TO_FRAME);
+      else if (fitIdx === 3) frame.fit(FitOptions.FRAME_TO_CONTENT);
+      else frame.fit(FitOptions.FILL_PROPORTIONALLY);
+    }catch(_){}
+  }
+
+  function collectTargets(){
+    var src = (selOnly.value && app.selection.length) ? app.selection : doc.allPageItems;
+    var out = [];
+    function visit(it){
+      try{
+        if (it.pageItems && it.pageItems.length){
+          for (var j=0;j<it.pageItems.length;j++) visit(it.pageItems[j]);
+        } else {
+          if (!canAcceptGraphic(it)) return;
+          if (isPlacedGraphic(it)) out.push(it);
+          else if (incEmpty.value && isShape(it)) out.push(it);
+        }
+      }catch(_){}
+    }
+    for (var i=0;i<src.length;i++) visit(src[i]);
+    return out;
+  }
+
+  // ---------- Build file map & order ----------
+  var files = listImageFiles(IMG_FOLDER);
+  if (!files.length){ alert("No image files found in the chosen folder."); return; }
+
+  var byName = {}; // base -> File
+  for (var i=0;i<files.length;i++) byName[ basenameNoExt(files[i].name) ] = files[i];
+
+  var ordered = files.slice(0);
+  var nextIdx = 0, used = {};
+  function nextFile(){
+    if (nextIdx >= ordered.length) nextIdx = 0;
+    return ordered[nextIdx++];
+  }
+
+  // ---------- Main loop ----------
+  app.doScript(function(){
+    var targets = collectTargets();
+    if (!targets.length){ alert("No target frames found. Tip: select frames or tick 'Include empty shapes'."); return; }
+
+    var stats = { relinked:0, placed:0, unmatched:0, total:targets.length };
+    var fitIdx = fitList.selection ? fitList.selection.index : 0;
+
+    for (var t=0; t<targets.length; t++){
+      var fr = unlockForEdit(targets[t]);
+      var targetFile = null;
+
+      // 1) Label
+      if (m1.value){
+        try {
+          var lbl = (fr.label||"").toLowerCase();
+          if (lbl && byName[lbl]) targetFile = byName[lbl];
+        }catch(_){}
+      }
+      // 2) Existing link basename
+      if (!targetFile && m2.value && isPlacedGraphic(fr)){
+        try{
+          var g = fr.allGraphics[0];
+          if (g && g.itemLink && g.itemLink.name){
+            var base = basenameNoExt(g.itemLink.name);
+            if (byName[base]) targetFile = byName[base];
+          }
+        }catch(_){}
+      }
+      // 3) Sequential
+      if (!targetFile){
+        var tries=0, cand;
+        do {
+          cand = nextFile(); tries++;
+          var key = cand.fsName.toLowerCase();
+          if (!used[key]){ targetFile = cand; used[key] = true; break; }
+        } while (tries <= ordered.length);
+      }
+
+      // Apply
+      try{
+        if (isPlacedGraphic(fr)){
+          if (targetFile){
+            try { fr.allGraphics[0].itemLink.relink(targetFile); } catch(_){}
+            fitGraphic(fr, fitIdx);
+            stats.relinked++;
+          } else {
+            stats.unmatched++;
+          }
+        } else {
+          // empty shape
+          if (targetFile){
+            try{ if(fr.hasOwnProperty("contentType")) fr.contentType = ContentType.GRAPHIC_TYPE; }catch(_){}
+            fr.place(targetFile);
+            fitGraphic(fr, fitIdx);
+            stats.placed++;
+          } else {
+            stats.unmatched++;
+          }
+        }
+      }catch(_){
+        stats.unmatched++;
+      }
+    }
+
+    alert("Image replace complete.\n\nTargets: "+stats.total+
+          "\nRelinked: "+stats.relinked+
+          "\nPlaced (empty): "+stats.placed+
+          "\nUnmatched: "+stats.unmatched);
+
+  }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, "INWIZ Image Folder Replace");
+
+})();
