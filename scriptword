@@ -1,0 +1,331 @@
+/* INWIZ_MasterWord_Aggregate_v1.jsx
+   Build ONE master Word file (.doc/RTF payload) that contains tagged blocks
+   for Script Labels coming from MULTIPLE InDesign templates.
+
+   ? How it works
+   - You pick: (1) a list of .indd/.indt files (multi-select) OR (2) a folder to scan.
+   - Script opens each template invisibly, harvests labels, then closes it.
+   - Produces a colorful, clickable Word doc with sections per template + per page:
+       [Tag]            ? tag name (from TAG=… or sanitized label)
+       …type here…      ? user edits here (text) OR paste image path
+       [/Tag]
+
+   Compatible with: INWIZ_WordTags_Import_v3_1.jsx (unchanged)
+
+   Tested: InDesign 2021–2025 (macOS/Windows)
+*/
+
+(function () {
+  // ---------- SETTINGS ----------
+  var INCLUDE_MASTER_ITEMS = true;   // include master pages/items
+  var ONLY_NONEMPTY_LABELS = true;   // skip empty .label
+  var SCAN_SUBFOLDERS      = false;  // when using "scan folder", look into subfolders too
+
+  // ---------- CHOOSE INPUT FILES ----------
+  var files = pickManyINDD();              // try multi-select first
+  if (!files) {
+    var folder = Folder.selectDialog("Select a folder that contains .indd/.indt templates (Cancel to use OPEN docs)");
+    if (folder) {
+      files = listINDDInFolder(folder, SCAN_SUBFOLDERS);
+    } else {
+      // Fallback: use currently OPEN documents
+      if (!hasDocs()) { alert("No files chosen and no documents open."); return; }
+      files = "__OPEN__";
+    }
+  }
+
+  // ---------- CHOOSE OUTPUT ----------
+  var outFile = File.saveDialog("Save MASTER Word file (.doc)", "*.doc");
+  if (!outFile) return;
+  if (!/\.(doc|rtf)$/i.test(outFile.name)) outFile = new File(outFile.fsName + ".doc");
+
+  // ---------- HARVEST ----------
+  var allRows = []; // {docName, docSlug, pageAbs, pageUI, type, layer, tag, isText, wPt, hPt}
+  var opened = [];  // docs we opened (to close later)
+
+  if (files === "__OPEN__") {
+    for (var d=0; d<app.documents.length; d++) {
+      var doc = app.documents[d];
+      try { harvestDoc(doc, allRows); } catch(e){}
+    }
+  } else {
+    // open each file invisibly, collect, close without saving
+    for (var i=0; i<files.length; i++) {
+      var f = files[i]; if (!(f instanceof File)) continue;
+      var docOpened = null;
+      try {
+        docOpened = app.open(f, false); // showingWindow=false
+        opened.push(docOpened);
+        harvestDoc(docOpened, allRows);
+      } catch (e) {
+        // continue
+      }
+    }
+    // close opened docs without saving
+    for (var c=0; c<opened.length; c++) {
+      try { opened[c].close(SaveOptions.NO); } catch(_){}
+    }
+  }
+
+  if (!allRows.length) { alert("No labeled items found."); return; }
+
+  // sort: doc -> page -> type/tag
+  allRows.sort(function(a,b){
+    if (a.docSlug!==b.docSlug) return (a.docSlug<b.docSlug?-1:1);
+    if (a.pageAbs!==b.pageAbs) return a.pageAbs-b.pageAbs;
+    if (a.pageUI!==b.pageUI)   return (a.pageUI<b.pageUI?-1:1);
+    if (a.isText!==b.isText)   return (a.isText? -1: 1);
+    return (a.tag<b.tag?-1:1);
+  });
+
+  // ---------- BUILD MASTER WORD (RTF) ----------
+  var r = [];
+  // fonts + colors: 1 black, 2 blue, 3 red, 4 green, 5 gray, 6 purple, 7 orange, 8 soft yellow
+  r.push("{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Arial;}{\\f1 Courier New;}}");
+  r.push("{\\colortbl;\\red0\\green0\\blue0;\\red0\\green112\\blue192;\\red200\\green0\\blue0;\\red0\\green153\\blue0;\\red120\\green120\\blue120;\\red120\\green0\\blue180;\\red232\\green120\\blue0;\\red255\\green245\\blue181;}");
+
+  r.push("\\fs40\\b INWIZ — Master Word (Multi-Template) \\b0\\fs20\\par");
+  r.push("\\fs18 Generated: " + enc(ts()) + "\\par\\par");
+
+  // Intro
+  r.push("\\fs22\\b How to use\\b0\\fs18\\par");
+  r.push("\\cf3 Do not delete bracket lines. \\cf0 Type ONLY between them.\\par");
+  r.push("\\tab TEXT ? replace \\f1 type here…\\f0\\par");
+  r.push("\\tab IMAGE ? paste FULL path (Windows: C:\\\\Imgs\\\\hero.jpg  | macOS: /Users/you/Pictures/hero.jpg)\\par\\par");
+
+  // Global Index (documents)
+  r.push("{\\*\\bkmkstart INDEX}{\\*\\bkmkend INDEX}");
+  r.push("\\fs22\\b Index (Templates)\\b0\\fs18\\par");
+  var perDoc = groupBy(allRows, function(x){ return x.docSlug; });
+  var docSlugs = keysOf(perDoc);
+  for (var s=0; s<docSlugs.length; s++){
+    var slug = docSlugs[s], docName = perDoc[slug][0].docName;
+    var target = "DOC__" + slug;
+    r.push(linkTo(target, "\\cf2\\b "+enc(docName)+"\\b0\\cf0  ("+perDoc[slug].length+" tags)", 2) + "\\par");
+  }
+  r.push("\\par");
+
+  // Big Table of Tags (document ? page ? [Tag])
+  r.push("\\fs22\\b Table of Tags\\b0\\fs18\\par");
+  r.push("{\\*\\bkmkstart TOC}{\\*\\bkmkend TOC}");
+  for (var s2=0; s2<docSlugs.length; s2++){
+    var slug2 = docSlugs[s2], rows = perDoc[slug2], docName2 = rows[0].docName;
+    r.push("\\par\\cf2\\b "+enc(docName2)+"\\b0\\cf0\\par");
+    var perPage = groupBy(rows, function(x){return x.pageAbs+"|"+x.pageUI;});
+    var pageKeys = keysOf(perPage);
+    for (var pk=0; pk<pageKeys.length; pk++){
+      var set = perPage[pageKeys[pk]];
+      var head = "Page P"+pad(set[0].pageAbs,3)+" ("+set[0].pageUI+")";
+      r.push("\\cf2 "+enc(head)+"\\cf0\\par");
+      for (var t=0; t<set.length; t++){
+        var row = set[t];
+        var bmk = tagBookmark(slug2, row.tag);
+        var kindColor = row.isText ? 4 : 6;
+        r.push(linkTo(bmk, "\\f1["+enc(row.tag)+"]\\f0", 2) + " (\\cf"+kindColor+" "+(row.isText?"TEXT":"IMAGE")+"\\cf0)\\par");
+      }
+    }
+  }
+  r.push("\\par\\pard\\sa200\\fs18 Total tags: "+allRows.length+"\\par\\page");
+
+  // Per-document sections with editable blocks
+  for (var d2=0; d2<docSlugs.length; d2++){
+    var slug3 = docSlugs[d2], rows2 = perDoc[slug3], docName3 = rows2[0].docName;
+
+    // Document header + bookmark
+    r.push("{\\*\\bkmkstart DOC__"+slug3+"}{\\*\\bkmkend DOC__"+slug3+"}");
+    r.push("\\fs28\\b\\cf2 "+enc(docName3)+"\\cf0\\b0\\fs18\\par");
+    r.push(linkTo("INDEX", "\\ul\\cf2 ? Back to Index\\cf0\\ulnone", 2) + "  ");
+    r.push(linkTo("TOC",   "\\ul\\cf2 Back to Table\\cf0\\ulnone", 2) + "\\par\\par");
+
+    var perPage2 = groupBy(rows2, function(x){return x.pageAbs+"|"+x.pageUI;});
+    var pageKeys2 = keysOf(perPage2);
+
+    for (var kk=0; kk<pageKeys2.length; kk++){
+      var set2 = perPage2[pageKeys2[kk]];
+      var head2 = "Page P"+pad(set2[0].pageAbs,3)+" ("+set2[0].pageUI+")";
+      r.push("\\fs24\\b\\cf2 "+enc(head2)+"\\cf0\\b0\\fs18\\par");
+
+      for (var i=0; i<set2.length; i++){
+        var row = set2[i];
+        var kindTxt = row.isText ? "TEXT" : "IMAGE";
+        var kindColor = row.isText ? 4 : 6;
+
+        var sizeTxt="";
+        if (!row.isText){
+          var wIn=row.wPt/72, hIn=row.hPt/72;
+          var wMm=Math.round(wIn*25.4), hMm=Math.round(hIn*25.4);
+          var wPx=Math.max(1, Math.round(wIn*300)), hPx=Math.max(1, Math.round(hIn*300));
+          sizeTxt = "Size ? "+wMm+"×"+hMm+" mm (~"+wPx+"×"+hPx+" px @300ppi)";
+        }
+
+        // anchor for this tag
+        var bmk = tagBookmark(slug3, row.tag);
+        r.push("{\\*\\bkmkstart "+bmk+"}{\\*\\bkmkend "+bmk+"}");
+
+        r.push("\\b Tag: \\b0\\f1 ["+enc(row.tag)+"]\\f0   (\\cf"+kindColor+" "+kindTxt+"\\cf0 • layer: "+enc(row.layer)+")\\par");
+        if (!row.isText){
+          r.push("\\i "+enc(sizeTxt)+"\\i0\\par");
+          r.push("Paste FULL image path between the next two bracket lines.\\par");
+        } else {
+          r.push("Type your text between the next two bracket lines.\\par");
+        }
+
+        r.push("\\f1 ["+enc(row.tag)+"]\\f0\\par");
+        r.push((row.isText ? "type here…" : "/absolute/path/to/image.jpg")+"\\par");
+        r.push("\\f1 [/"+enc(row.tag)+"]\\f0\\par");
+
+        r.push(linkTo("TOC", "\\ul\\cf2 ? Back to Table\\cf0\\ulnone", 2) + "\\par");
+        r.push("\\par");
+      }
+      r.push("\\par");
+    }
+    if (d2 < docSlugs.length-1) r.push("\\page");
+  }
+
+  r.push("}");
+
+  // write file
+  try { writeText(outFile, r.join("")); } catch(e){ alert("Write failed: "+e.message); }
+
+  // ================= helpers =================
+  function hasDocs(){ try { return app.documents.length>0; } catch(_){ return false; } }
+
+  function pickManyINDD(){
+    // Multi-select file picker; returns array or null
+    try {
+      var filter = function(f){ return (f instanceof Folder) || /\.(indd|indt)$/i.test(f.name); };
+      var result = File.openDialog("Select .indd/.indt templates (you can multi-select)", filter, true);
+      if (!result || (result && !result.length)) return null;
+      // Normalize to File[]
+      var arr = [];
+      for (var i=0;i<result.length;i++){ if (result[i] instanceof File) arr.push(result[i]); }
+      return arr.length ? arr : null;
+    } catch(_){ return null; }
+  }
+
+  function listINDDInFolder(folder, recurse){
+    var out=[], i, list = folder.getFiles();
+    for (i=0;i<list.length;i++){
+      var it = list[i];
+      if (it instanceof File && /\.(indd|indt)$/i.test(it.name)) out.push(it);
+      else if (recurse && it instanceof Folder) out = out.concat(listINDDInFolder(it, recurse));
+    }
+    return out;
+  }
+
+  function harvestDoc(doc, sink){
+    var docName = safeDocName(doc);
+    var slug    = docSlug(docName);
+
+    // pages + items
+    for (var p=0; p<doc.pages.length; p++){
+      var pg = doc.pages[p]; if (!isObj(pg)) continue;
+      var pgAbs = pAbs(pg), pgUI = pUI(pg);
+
+      var items=[]; try { items=pg.allPageItems; }
+      catch(_){ try { items=pg.pageItems.everyItem().getElements(); } catch(__){ items=[]; } }
+
+      for (var i=0;i<items.length;i++){
+        var it = items[i]; if (!isObj(it)) continue;
+        var L  = lbl(it); if (ONLY_NONEMPTY_LABELS && !L.length) continue;
+        var T  = iType(it);
+        if (T==="Guide"||T==="Note"||T==="UnresolvedTextPath"||T==="Sound"||T==="Movie") continue;
+        if (T !== "TextFrame" && T !== "Table") continue;
+
+        var tag = pickTag(L);
+        if (!tag) continue;
+
+        var isText = (T==="TextFrame" || T==="Table");
+        var gb=null; try { gb = it.visibleBounds || it.geometricBounds; } catch(_){}
+        var wPt=0,hPt=0; if (gb && gb.length===4){ wPt = Math.max(0, gb[3]-gb[1]); hPt = Math.max(0, gb[2]-gb[0]); }
+
+        sink.push(rec(docName, slug, pgAbs, pgUI, T, safeLayer(it), tag, isText, wPt, hPt));
+      }
+    }
+
+    // masters
+    if (INCLUDE_MASTER_ITEMS && doc.masterSpreads && doc.masterSpreads.length){
+      for (var ms=0; ms<doc.masterSpreads.length; ms++){
+        var msp = doc.masterSpreads[ms]; if (!isObj(msp)) continue;
+        for (var mp=0; mp<msp.pages.length; mp++){
+          var mPage = msp.pages[mp]; if (!isObj(mPage)) continue;
+          var mName = "MASTER-"+pUI(mPage);
+
+          var mitems=[]; try { mitems=mPage.allPageItems; }
+          catch(_){ try { mitems=mPage.pageItems.everyItem().getElements(); } catch(__){ mitems=[]; } }
+
+          for (var mi=0; mi<mitems.length; mi++){
+            var mit=mitems[mi]; if (!isObj(mit)) continue;
+            var L2=lbl(mit); if (ONLY_NONEMPTY_LABELS && !L2.length) continue;
+            var TT=iType(mit);
+            if (TT==="Guide"||TT==="Note"||TT==="UnresolvedTextPath"||TT==="Sound"||TT==="Movie") continue;
+            if (TT !== "TextFrame" && TT !== "Table") continue;
+
+            var tag2 = pickTag(L2); if (!tag2) continue;
+            sink.push(rec(docName, slug, 0, mName, TT, safeLayer(mit), tag2, (TT==="TextFrame" || TT==="Table"), 0,0));
+          }
+        }
+      }
+    }
+  }
+
+  function rec(docName, docSlug, pageAbs, pageUI, type, layer, tag, isText, wPt, hPt){
+    return {docName:docName, docSlug:docSlug, pageAbs:pageAbs, pageUI:pageUI, type:type, layer:layer, tag:tag, isText:isText, wPt:wPt, hPt:hPt};
+  }
+
+  // ---- Tag rule (same family as your importer v3.1) ----
+  function pickTag(label){
+    // 1) explicit TAG=MyTag wins
+    var m = /(?:^|[|;])(?:TAG|WordTag|WTag)\\s*=\\s*([A-Za-z0-9_\\-]+)/i.exec(label||"");
+    if (m && m[1]) return m[1];
+
+    // 2) fallback from whole label:
+    //    - drop trailing type hints (TEXT/IMAGE)
+    //    - if contains "_<digits>..." cut after the digits
+    var s = String(label||"");
+    s = s.replace(/\\s*\\(?\\b(TEXT|IMAGE)\\b\\)?\\s*$/i, "");
+    s = s.replace(/_+(TEXT|IMAGE)\\s*$/i, "");
+    var m2 = /(.*?_\\d+)(?:[_().A-Za-z].*)?$/i.exec(s);
+    if (m2 && m2[1]) s = m2[1];
+
+    s = s.replace(/[^A-Za-z0-9_\\-]+/g,"_").replace(/^_+|_+$/g,"").replace(/_{2,}/g,"_");
+    return s.slice(0,64) || null;
+  }
+
+  // ---- RTF helpers ----
+  function enc(s){
+    s = String(s);
+    var out=[], ch, code;
+    for (var i=0;i<s.length;i++){
+      ch=s.charAt(i); code=s.charCodeAt(i);
+      if (ch==="\\") out.push("\\\\");
+      else if (ch==="{") out.push("\\{");
+      else if (ch==="}") out.push("\\}");
+      else if (code>127) out.push("\\u"+(code>32767?code-65536:code)+"?");
+      else if (ch==="\r"||ch==="\n") out.push("\\line ");
+      else out.push(ch);
+    }
+    return out.join("");
+  }
+  function linkTo(bookmarkName, displayRtf, colorIndex){
+    return "{\\field{\\*\\fldinst HYPERLINK \\\\l \""+bookmarkName+"\"}{\\fldrslt \\cf"+(colorIndex||2)+" "+displayRtf+" \\cf0}}";
+  }
+  function tagBookmark(docSlug, tag){ return ("TAG__"+docSlug+"__"+tag).replace(/[^A-Za-z0-9_]/g,"_").slice(0,128); }
+
+  // ---- Generic helpers ----
+  function hasDocs(){ try { return app.documents.length>0; } catch(_){ return false; } }
+  function isObj(o){ try { return o && o.isValid===true; } catch(_){ return false; } }
+  function pAbs(p){ try { return (p.documentOffset||0)+1; } catch(_){ return 0; } }
+  function pUI(p){ try { return String(p.name); } catch(_){ return "Unknown"; } }
+  function iType(o){ try { if (o.reflect && o.reflect.name) return String(o.reflect.name); } catch(_){}
+                     try { return String(o.constructor.name||"PageItem"); } catch(__){ return "PageItem"; } }
+  function lbl(o){ try { return String(o.label||""); } catch(_){ return ""; } }
+  function safeLayer(o){ try { return (o.itemLayer && o.itemLayer.isValid) ? o.itemLayer.name : "(no layer)"; } catch(_){ return "(no layer)"; } }
+  function safeDocName(d){ try { return d.name; } catch(_){ return "(document)"; } }
+  function docSlug(nm){ return String(nm).replace(/\.[^.]+$/,"").replace(/[^A-Za-z0-9_]/g,"_").slice(0,64) || "DOC"; }
+  function writeText(f, txt){ f.encoding="UTF-8"; f.lineFeed="Windows"; if (f.exists) f.remove(); if (!f.parent.exists) f.parent.create(); f.open("w"); f.write(txt); f.close(); }
+  function ts(){ var d=new Date(); function t(n){return (n<10?"0":"")+n;} return d.getFullYear()+"-"+t(d.getMonth()+1)+"-"+t(d.getDate())+" "+t(d.getHours())+":"+t(d.getMinutes()); }
+  function pad(n,w){ var s=String(n); while(s.length<w) s="0"+s; return s; }
+  function groupBy(arr,fn){ var m={}; for (var i=0;i<arr.length;i++){ var k=fn(arr[i]); (m[k]||(m[k]=[])).push(arr[i]); } return m; }
+  function keysOf(o){ var a=[]; for (var k in o) if (o.hasOwnProperty(k)) a.push(k); a.sort(); return a; }
+})();
