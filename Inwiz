@@ -1,0 +1,512 @@
+/** Inwiz — Compact + Progress (2 Tabs, Custom BG, Quote Footer)
+ *  #target indesign
+ *  InDesign 2022–2025
+ *  - Simple & Category tabs (compact)
+ *  - Word(.docx [Label]) / TXT-RTF (Label: value)
+ *  - Excel folder ? labeled text frames (tables)
+ *  - Images / Icons ? labeled graphic frames
+ *  - Auto-flow overset text (adds pages & threads)
+ *  - Exports: Print PDF (preset), Digital PDF, Package
+ *  - Progress bar across all steps; footer shows italic quote
+ *  - Top/Bottom logo, Home button with house symbol (Unicode \u2302)
+ *  - SVG code for home icon (for reference; ScriptUI uses symbol as direct SVG embedding not supported):
+ *    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-house" viewBox="0 0 16 16">
+ *      <path d="M8.707 1.5a1 1 0 0 0-1.414 0L.646 8.146a.5.5 0 0 0 .708.708L2 8.207V13.5A1.5 1.5 0 0 0 3.5 15h9a1.5 1.5 0 0 0 1.5-1.5V8.207l.646.647a.5.5 0 0 0 .708-.708L13 5.793V2.5a.5.5 0 0 0-.5-.5h-1a.5.5 0 0 0-.5.5v1.293zM13 7.207V13.5a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5V7.207l5-5z"/>
+ *    </svg>
+ 		Note: Do not Change or Remove: Copyright Mustafa Khan
+ */
+
+#target indesign
+(function () {
+
+// ====== THEME ======
+var PANEL_BG = [0.10, 0.14, 0.18, 1]; // change RGBA (0–1) for background
+var LOGO_PATH = "/Users/mustafa.khan/Library/CloudStorage/OneDrive-JLL/Desktop/1. New Automation AI Advance_New/logo.png";
+var HOME_JSX_PATH = "/Users/mustafa.khan/Library/CloudStorage/OneDrive-JLL/Desktop/2025 Launch Ready/Master_Panel_Final_090.jsx"; // Adjust to your Monarch home script path
+
+// ------- STATE -------
+var PATHS = { wordOrTextFile:null, excelFolder:null, imageFolder:null, iconFolder:null, outputFolder:null };
+var SIMPLE = { folder:null, templates:[], selectedIndex:0 };
+var CATS = ["Brochure","Social Tile","Flyer","One-Pager","Report","Other"];
+var CATDATA = {}; for (var i=0;i<CATS.length;i++) CATDATA[CATS[i]] = { folder:null, templates:[] };
+
+// ------- WINDOW (compact) -------
+var w = new Window('palette', 'Inwiz — Compact', undefined, {resizeable: true});
+w.alignChildren = ['fill','top']; w.margins = 6; w.spacing = 6;
+w.graphics.backgroundColor = w.graphics.newBrush(w.graphics.BrushType.SOLID_COLOR, PANEL_BG);
+
+// Top Header with Logo and Home Button
+var header = w.add('group'); header.orientation = 'row'; header.alignChildren = ['fill', 'center']; header.spacing = 6;
+header.alignment = 'fill';
+
+// Home Button (small icon-like button with house symbol)
+var bHome = header.add('button', [0,0,0,26], '\u2302 Home'); // Unicode house symbol as icon
+bHome.helpTip = "Go Home";
+bHome.onClick = function() {
+  try {
+    w.close();
+    var homeFile = new File(HOME_JSX_PATH);
+    if (homeFile.exists) {
+      app.doScript(homeFile, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, "Open Home");
+    } else {
+      alert("Home script not found: " + HOME_JSX_PATH);
+    }
+  } catch(e) {
+    alert("Failed to open Home: " + e.message);
+  }
+};
+
+// Logo (top)
+var logoTopGroup = header.add('group'); logoTopGroup.orientation = 'column'; logoTopGroup.alignChildren = 'center';
+var logoTopFile = new File(LOGO_PATH);
+if (logoTopFile.exists) {
+  var logoTop = logoTopGroup.add('image', undefined, logoTopFile);
+  logoTop.preferredSize = [170, 40];
+} else {
+  var logoTopText = logoTopGroup.add('statictext', undefined, "Logo");
+  logoTopText.graphics.font = ScriptUI.newFont("dialog", "bold", 12);
+}
+
+// Spacer for alignment
+var spacer = header.add('group'); spacer.alignment = 'fill';
+
+// Tabs
+var tabs = w.add('tabbedpanel'); tabs.margins=[0,0,0,0]; tabs.minimumSize.height = 320;
+
+// helpers
+function row(p, label, btnText, handler, lw, bw){
+  var g = p.add('group'); g.orientation='row'; g.spacing=6; g.margins=0;
+  var s = g.add('statictext', undefined, label); s.preferredSize=[lw||130,16];
+  var b = g.add('button', undefined, btnText||'Select'); b.preferredSize=[bw||110,22]; b.onClick = handler;
+  return {group:g, label:s, button:b};
+}
+function divider(p){ p.add('panel', [0,0,400,1]); }
+
+// -------- TAB: SIMPLE --------
+var tS = tabs.add('tab', undefined, 'Simple');
+tS.alignChildren=['fill','top']; tS.margins=6; tS.spacing=6;
+
+row(tS, 'Template Folder:', 'Select', function(){
+  var f = Folder.selectDialog("Select a folder with .indd templates");
+  if (!f) return;
+  SIMPLE.folder = f.fsName;
+  SIMPLE.templates = scanIndd(f);
+  ddSimple.removeAll();
+  for (var i=0;i<SIMPLE.templates.length;i++) ddSimple.add('item', SIMPLE.templates[i].name);
+  if (ddSimple.items.length){ ddSimple.selection=0; SIMPLE.selectedIndex=0; }
+});
+var gDD = tS.add('group'); gDD.orientation='row'; gDD.spacing=6;
+gDD.add('statictext', undefined, 'Template:').preferredSize=[130,16];
+var ddSimple = gDD.add('dropdownlist', undefined, []); ddSimple.preferredSize=[260,20];
+ddSimple.onChange = function(){ if (ddSimple.selection) SIMPLE.selectedIndex = ddSimple.selection.index; };
+
+var gV = tS.add('group'); gV.orientation='row'; gV.spacing=6;
+gV.add('statictext', undefined, 'Versions:').preferredSize=[130,16];
+var ddVersionsS = gV.add('dropdownlist', undefined, ['1','2','3','4','5']); ddVersionsS.selection=0; ddVersionsS.preferredSize=[60,20];
+
+divider(tS);
+row(tS,'Text/Word File:','Select', function(){
+  var f = File.openDialog("Select .docx, .txt, or .rtf", function(ff){ return ff instanceof File && /\.(docx|txt|rtf)$/i.test(ff.name); });
+  if (f) PATHS.wordOrTextFile = f.fsName;
+});
+row(tS,'Excel Folder:','Select', function(){ var f=Folder.selectDialog("Select folder with .xls/.xlsx"); if (f) PATHS.excelFolder=f.fsName; });
+row(tS,'Image Folder:','Select', function(){ var f=Folder.selectDialog("Select images folder"); if (f) PATHS.imageFolder=f.fsName; });
+row(tS,'Icon Folder:','Select',  function(){ var f=Folder.selectDialog("Select icons folder");  if (f) PATHS.iconFolder=f.fsName; });
+row(tS,'Output Folder:','Select',function(){ var f=Folder.selectDialog("Select OUTPUT folder (required)"); if (f) PATHS.outputFolder=f.fsName; });
+
+divider(tS);
+var gExpS = tS.add('group'); gExpS.orientation='row'; gExpS.spacing=12;
+var chkPrintS   = gExpS.add('checkbox', undefined, 'Print PDF');   chkPrintS.value = true;
+var chkDigitalS = gExpS.add('checkbox', undefined, 'Digital PDF'); chkDigitalS.value = true;
+var chkPackageS = gExpS.add('checkbox', undefined, 'Package');     chkPackageS.value = true;
+
+var gPreS = tS.add('group'); gPreS.orientation='row'; gPreS.spacing=6;
+gPreS.add('statictext', undefined, 'Preset:').preferredSize=[130,16];
+var ddPreS = gPreS.add('dropdownlist', undefined, []); ddPreS.preferredSize=[260,20];
+
+// -------- TAB: CATEGORY --------
+var tC = tabs.add('tab', undefined, 'Category');
+tC.alignChildren=['fill','top']; tC.margins=6; tC.spacing=6;
+
+// category folders
+for (var ci=0; ci<CATS.length; ci++){
+  (function(name){
+    row(tC, name+' Folder:', 'Select', function(){
+      var f = Folder.selectDialog("Select folder for "+name+" (.indd)");
+      if (!f) return;
+      CATDATA[name].folder = f.fsName;
+      CATDATA[name].templates = scanIndd(f);
+    });
+  })(CATS[ci]);
+}
+
+var gPick = tC.add('group'); gPick.orientation='row'; gPick.spacing=6;
+gPick.add('statictext', undefined, 'Run Category:').preferredSize=[130,16];
+var ddCat = gPick.add('dropdownlist', undefined, CATS); ddCat.selection=0; ddCat.preferredSize=[160,20];
+
+var gV2 = tC.add('group'); gV2.orientation='row'; gV2.spacing=6;
+gV2.add('statictext', undefined, 'Versions:').preferredSize=[130,16];
+var ddVersionsC = gV2.add('dropdownlist', undefined, ['1','2','3','4','5']); ddVersionsC.selection=0; ddVersionsC.preferredSize=[60,20];
+
+divider(tC);
+row(tC,'Text/Word File:','Select', function(){
+  var f = File.openDialog("Select .docx, .txt, or .rtf", function(ff){ return ff instanceof File && /\.(docx|txt|rtf)$/i.test(ff.name); });
+  if (f) PATHS.wordOrTextFile = f.fsName;
+});
+row(tC,'Excel Folder:','Select', function(){ var f=Folder.selectDialog("Select folder with .xls/.xlsx"); if (f) PATHS.excelFolder=f.fsName; });
+row(tC,'Image Folder:','Select', function(){ var f=Folder.selectDialog("Select images folder"); if (f) PATHS.imageFolder=f.fsName; });
+row(tC,'Icon Folder:','Select',  function(){ var f=Folder.selectDialog("Select icons folder");  if (f) PATHS.iconFolder=f.fsName; });
+row(tC,'Output Folder:','Select',function(){ var f=Folder.selectDialog("Select OUTPUT folder (required)"); if (f) PATHS.outputFolder=f.fsName; });
+
+divider(tC);
+var gExpC = tC.add('group'); gExpC.orientation='row'; gExpC.spacing=12;
+var chkPrintC   = gExpC.add('checkbox', undefined, 'Print PDF');   chkPrintC.value = true;
+var chkDigitalC = gExpC.add('checkbox', undefined, 'Digital PDF'); chkDigitalC.value = true;
+var chkPackageC = gExpC.add('checkbox', undefined, 'Package');     chkPackageC.value = true;
+
+var gPreC = tC.add('group'); gPreC.orientation='row'; gPreC.spacing=6;
+gPreC.add('statictext', undefined, 'Preset:').preferredSize=[130,16];
+var ddPreC = gPreC.add('dropdownlist', undefined, []); ddPreC.preferredSize=[260,20];
+
+// load PDF presets (once)
+(function loadPresets(){
+  try{
+    var presets = app.pdfExportPresets, want="[High Quality Print]", pick=0;
+    for (var i=0;i<presets.length;i++){
+      ddPreS.add('item', presets[i].name);
+      ddPreC.add('item', presets[i].name);
+      if (presets[i].name===want) pick=i;
+    }
+    ddPreS.selection = ddPreS.items.length ? ddPreS.items[pick] : null;
+    ddPreC.selection = ddPreC.items.length ? ddPreC.items[pick] : null;
+  }catch(e){}
+})();
+
+// -------- Run + PROGRESS --------
+var gRun = w.add('group'); gRun.margins=[0,0,0,0]; gRun.alignment='fill'; gRun.spacing=6;
+var btnGen = gRun.add('button', undefined, 'Generate'); btnGen.preferredSize=[180,26];
+var statusTxt = gRun.add('statictext', undefined, 'Ready'); statusTxt.alignment='fill';
+
+var pb = w.add('progressbar', undefined, 0, 100); pb.preferredSize = [undefined, 12];
+
+// Footer: Quote + Bottom Logo
+var footer = w.add('group'); footer.orientation = 'column'; footer.alignChildren = 'center'; footer.alignment = 'fill';
+var gQuote = footer.add('group'); gQuote.alignment='fill';
+var quote = gQuote.add('statictext', undefined, "we have done it though automation!");
+quote.graphics.font = ScriptUI.newFont("dialog", "italic", 10);
+quote.justify = "center";
+
+// Logo (bottom)
+var logoBottomGroup = footer.add('group'); logoBottomGroup.orientation = 'column'; logoBottomGroup.alignChildren = 'center';
+var logoBottomFile = new File(LOGO_PATH);
+if (logoBottomFile.exists) {
+  var logoBottom = logoBottomGroup.add('image', undefined, logoBottomFile);
+  logoBottom.preferredSize = [40, 40];
+} else {
+  var logoBottomText = logoBottomGroup.add('statictext', undefined, "Logo");
+  logoBottomText.graphics.font = ScriptUI.newFont("dialog", "bold", 12);
+}
+
+w.center(); w.show();
+
+// ================== RUN ==================
+btnGen.onClick = function(){
+  try{
+    if (!PATHS.outputFolder) throw new Error("Select an OUTPUT folder.");
+
+    var list = [], versions = 1, doPrint, doDigital, doPkg, preset;
+
+    if (tabs.selection === tS){
+      if (!SIMPLE.folder || !SIMPLE.templates.length) throw new Error("Simple: pick a template folder.");
+      versions = parseInt(ddVersionsS.selection.text,10);
+      preset   = ddPreS.selection ? ddPreS.selection.text : "[High Quality Print]";
+      doPrint  = chkPrintS.value; doDigital = chkDigitalS.value; doPkg = chkPackageS.value;
+
+      var start = ddSimple.selection ? ddSimple.selection.index : 0;
+      for (var i=0;i<versions && (start+i)<SIMPLE.templates.length; i++) list.push(SIMPLE.templates[start+i]);
+
+    } else {
+      var cat = ddCat.selection.text, data = CATDATA[cat];
+      if (!data.folder || !data.templates.length) throw new Error("Category '"+cat+"': select a folder with .indd files.");
+      versions = parseInt(ddVersionsC.selection.text,10);
+      preset   = ddPreC.selection ? ddPreC.selection.text : "[High Quality Print]";
+      doPrint  = chkPrintC.value; doDigital = chkDigitalC.value; doPkg = chkPackageC.value;
+
+      for (var j=0;j<versions && j<data.templates.length; j++) list.push(data.templates[j]);
+    }
+
+    if (!list.length) throw new Error("No templates resolved.");
+
+    // ===== Progress plan: steps per document =====
+    var stepsPerDoc = 1; // open
+    if (PATHS.wordOrTextFile) stepsPerDoc++;
+    if (PATHS.excelFolder)    stepsPerDoc++;
+    if (PATHS.imageFolder || PATHS.iconFolder) stepsPerDoc++;
+    stepsPerDoc++; // recompose/autoflow
+    if (doPrint)   stepsPerDoc++;
+    if (doDigital) stepsPerDoc++;
+    if (doPkg)     stepsPerDoc++;
+    stepsPerDoc++; // close
+
+    var totalSteps = stepsPerDoc * list.length;
+    initProgress(totalSteps);
+
+    var outRoot = new Folder(PATHS.outputFolder + "/Inwiz_" + ts());
+    if (!outRoot.exists) outRoot.create();
+
+    noUI(function(){
+      for (var k=0;k<list.length;k++){
+        var tpl = list[k];
+        setStatus("Opening: " + tpl.name + " ("+(k+1)+"/"+list.length+")");
+        var doc = null;
+
+        // open
+        try { doc = app.open(tpl); progressTick(); }
+        catch(e){ progressTick(); continue; }
+
+        // content: Word/TXT/RTF
+        try{
+          if (PATHS.wordOrTextFile){
+            var wf = new File(PATHS.wordOrTextFile);
+            if (wf.exists){ if (/\.docx$/i.test(wf.name)) importDocx(doc,wf); else importTextMap(doc,wf); }
+          }
+        }catch(_){}
+        if (PATHS.wordOrTextFile) progressTick();
+
+        // excel
+        try{ if (PATHS.excelFolder) placeExcel(doc, PATHS.excelFolder); }catch(_){}
+        if (PATHS.excelFolder) progressTick();
+
+        // images/icons
+        try{ if (PATHS.imageFolder || PATHS.iconFolder) placeImagesIcons(doc, PATHS.imageFolder, PATHS.iconFolder); }catch(_){}
+        if (PATHS.imageFolder || PATHS.iconFolder) progressTick();
+
+        // recompose + autoflow
+        try{ doc.stories.everyItem().recompose(); autoFlowAll(doc); }catch(_){}
+        progressTick();
+
+        // exports
+        var dest = new Folder(outRoot.fsName + "/" + withoutExt(tpl.name)); if (!dest.exists) dest.create();
+        try{ if (doPrint)   exportPrint(doc, dest, preset); }catch(_){}
+        if (doPrint) progressTick();
+
+        try{ if (doDigital) exportInteractive(doc, dest); }catch(_){}
+        if (doDigital) progressTick();
+
+        try{ if (doPkg)     doPackage(doc, dest); }catch(_){}
+        if (doPkg) progressTick();
+
+        // close
+        try{ doc.close(SaveOptions.NO); }catch(_){}
+        progressTick();
+      }
+    });
+
+    setStatus("All tasks complete ?  Output: " + outRoot.fsName);
+    completeProgress();
+
+  }catch(e){
+    alert("Inwiz Error: " + e.message + " (line " + (e.line||'?') + ")");
+    setStatus("ERROR: " + e.message);
+    completeProgress();
+  }
+};
+
+// ================== PROGRESS HELPERS ==================
+var PB_TOTAL = 100, PB_STEP = 1, PB_COUNT = 0;
+function initProgress(totalSteps){
+  PB_TOTAL = Math.max(1, totalSteps);
+  PB_STEP  = 100 / PB_TOTAL;
+  PB_COUNT = 0;
+  pb.value = 0;
+  w.update();
+}
+function progressTick(){
+  PB_COUNT++;
+  pb.value = Math.min(100, PB_COUNT * PB_STEP);
+  w.update();
+}
+function completeProgress(){ pb.value = 100; w.update(); }
+
+// ================== GENERAL HELPERS ==================
+function setStatus(s){ statusTxt.text = s; w.update(); }
+function ts(){ var d=new Date(); function p(n){return (n<10?'0':'')+n;} return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"_"+p(d.getHours())+p(d.getMinutes())+p(d.getSeconds()); }
+function noUI(fn){ var prev=app.scriptPreferences.userInteractionLevel; app.scriptPreferences.userInteractionLevel=UserInteractionLevels.NEVER_INTERACT; try{ return fn(); } finally { app.scriptPreferences.userInteractionLevel=prev; } }
+function scanIndd(folder){ var files = (new Folder(folder)).getFiles(function(f){ return f instanceof File && /\.indd$/i.test(f.name); }); files.sort(function(a,b){var A=a.name.toLowerCase(),B=b.name.toLowerCase(); return A<B?-1:(A>B?1:0);}); return files; }
+function withoutExt(n){ return n.replace(/\.[^\.]+$/,''); }
+
+// ===== Auto-flow engine =====
+function copyTF(src,dst){
+  try{
+    var p=src.textFramePreferences, q=dst.textFramePreferences;
+    q.textColumnCount=p.textColumnCount; q.textColumnGutter=p.textColumnGutter;
+    q.insetSpacing=p.insetSpacing; q.verticalJustification=p.verticalJustification;
+    q.firstBaselineOffset=p.firstBaselineOffset; q.minimumFirstBaselineOffset=p.minimumFirstBaselineOffset;
+    q.autoSizingType=p.autoSizingType; q.autoSizingReferencePoint=p.autoSizingReferencePoint;
+  }catch(_){}
+  try{ dst.rotationAngle = src.rotationAngle; }catch(_){}
+}
+function autoFlowFrom(frame, cap){
+  var doc=frame.parent.parent, limit=cap||200, last=frame;
+  while (last.overflows && limit-- > 0){
+    var p=doc.pages.add(Location.AFTER, doc.pages[-1]);
+    var gb=last.geometricBounds;
+    var nf=p.textFrames.add({ geometricBounds: gb });
+    copyTF(last, nf);
+    last.nextTextFrame = nf;
+    last = nf;
+    try{ last.parentStory.recompose(); }catch(_){}
+  }
+}
+function autoFlowAll(doc){
+  var frames = doc.textFrames.everyItem().getElements();
+  for (var i=0;i<frames.length;i++){
+    try{
+      var f = frames[i];
+      if (f.overflows){
+        var tail=f; while (tail.nextTextFrame && tail.nextTextFrame.isValid) tail=tail.nextTextFrame;
+        autoFlowFrom(tail, 200);
+      }
+    }catch(_){}
+  }
+}
+
+// ===== Word/TXT/RTF engines =====
+function importDocx(doc, file){
+  var tf = doc.pages[0].textFrames.add({ geometricBounds:[0,0,100,100] });
+  tf.place(file);
+  var paras = tf.parentStory.paragraphs, map={}, cur="";
+  for (var i=0;i<paras.length;i++){
+    var t = paras[i].contents.toString().replace(/^\s+|\s+$/g,'');
+    var m = t.match(/^\[(.+?)\]$/);
+    if (m){ cur = m[1].toLowerCase(); map[cur] = ""; }
+    else if (cur){ map[cur] += t + "\r"; }
+  }
+  tf.remove();
+  applyMap(doc,map);
+  try{ doc.stories.everyItem().recompose(); }catch(_){}
+  flowFromMap(doc,map);
+}
+function importTextMap(doc, file){
+  file.open('r'); var txt=file.read(); file.close();
+  txt = txt.replace(/\r\n/g,"\n").replace(/\r/g,"\n").replace(/\n/g,"\r"); // hard returns
+  var lines=txt.split(/\r/), map={}, cur=null, buf="";
+  for (var i=0;i<lines.length;i++){
+    var line=lines[i], idx=line.indexOf(":");
+    if (idx>-1){ if (cur!==null) map[cur.toLowerCase()] = buf; cur = line.substring(0,idx); buf = line.substring(idx+1).replace(/^\s+/,''); }
+    else if (cur!==null){ buf += "\r" + line; }
+  }
+  if (cur!==null) map[cur.toLowerCase()] = buf;
+  applyMap(doc,map);
+  try{ doc.stories.everyItem().recompose(); }catch(_){}
+  flowFromMap(doc,map);
+}
+function applyMap(doc,map){
+  var frames = doc.textFrames.everyItem().getElements();
+  for (var i=0;i<frames.length;i++){
+    var f = frames[i], key = (f.label||"").toLowerCase();
+    if (!key) continue;
+    if (map.hasOwnProperty(key)) f.contents = map[key];
+  }
+}
+function flowFromMap(doc,map){
+  var frames = doc.textFrames.everyItem().getElements();
+  for (var i=0;i<frames.length;i++){
+    var f = frames[i], key=(f.label||"").toLowerCase();
+    if (key && map.hasOwnProperty(key)){ if (f.overflows) autoFlowFrom(f, 200); }
+  }
+}
+
+// ===== Excel engine =====
+function placeExcel(doc, folderPath){
+  var fo = new Folder(folderPath); if (!fo.exists) return;
+  var files = fo.getFiles(function(f){ return f instanceof File && /\.(xls|xlsx)$/i.test(f.name); });
+  var byBase={}, byExact={}; for (var i=0;i<files.length;i++){ var f=files[i], nm=f.name.toLowerCase(), base=nm.replace(/\.[^\.]+$/,''); byExact[nm]=f; byBase[base]=f; }
+
+  app.excelImportPreferences.tableFormatting = TableFormattingOptions.EXCEL_UNFORMATTED_TABLE;
+  app.excelImportPreferences.useTypographersQuotes=false;
+  app.excelImportPreferences.preserveGraphics=false;
+  app.excelImportPreferences.sheetIndex = 0;
+
+  var items = doc.pageItems.everyItem().getElements();
+  for (var j=0;j<items.length;j++){
+    var tf = items[j]; if (!(tf instanceof TextFrame)) continue;
+    var label = (tf.label||"").toLowerCase(); if (!label) continue;
+    var file = byExact[label] || byBase[label] || byBase[label.replace(/\.(xls|xlsx)$/,'')];
+    if (!file) continue;
+
+    try{
+      tf.contents = "";
+      tf.place(file);
+      tf.parentStory.recompose();
+      if (tf.tables.length) tf.tables[0].recompose();
+      if (tf.overflows) autoFlowFrom(tf, 200);
+    }catch(e){}
+  }
+}
+
+// ===== Images / Icons engine =====
+function placeImagesIcons(doc, imgPath, iconPath){
+  var haveImg = imgPath && Folder(imgPath).exists;
+  var haveIco = iconPath && Folder(iconPath).exists;
+  if (!haveImg && !haveIco) return;
+
+  var allowed = /\.(jpg|jpeg|png|tif|tiff|gif|bmp|psd|ai)$/i;
+  function build(path){
+    var o={by:{}, list:[]}; if (!path) return o;
+    var fo=new Folder(path); if (!fo.exists) return o;
+    var arr=fo.getFiles(function(f){ return f instanceof File && allowed.test(f.name); });
+    for (var i=0;i<arr.length;i++){ var f=arr[i], k=f.name.replace(/\.[^\.]+$/,'').toLowerCase(); o.by[k]=f; o.list.push(f); }
+    return o;
+  }
+  var imgs = build(imgPath), icons = build(iconPath), used={};
+
+  var frames=[], all=doc.allPageItems;
+  for (var a=0;a<all.length;a++){
+    var it=all[a];
+    var isG=(it.constructor.name==="Rectangle"||it.constructor.name==="Polygon"||it.constructor.name==="Ellipse")
+            && it.contentType===ContentType.GRAPHIC_TYPE && it.images.length===0;
+    if (isG) frames.push(it);
+  }
+
+  var unl=[];
+  for (var i=0;i<frames.length;i++){
+    var fr=frames[i], lbl=(fr.label||"").toLowerCase();
+    if (!lbl){ unl.push(fr); continue; }
+    var isIcon=/^icon[:_]/.test(lbl), key=isIcon? lbl.replace(/^icon[:_]/,''):lbl;
+    var src=isIcon? icons.by[key] : imgs.by[key];
+    if (src && !used[src.fsName]){
+      try{ fr.place(src); fr.fit(FitOptions.FILL_PROPORTIONALLY); used[src.fsName]=1; }catch(e){}
+    } else { unl.push(fr); }
+  }
+
+  // fill remaining unlabeled frames with unused images
+  for (var u=0, li=0; u<unl.length && li<imgs.list.length; u++, li++){
+    while(li<imgs.list.length && used[imgs.list[li].fsName]) li++;
+    if (li<imgs.list.length){ try{ unl[u].place(imgs.list[li]); unl[u].fit(FitOptions.FILL_PROPORTIONALLY); }catch(e){} }
+  }
+}
+
+// ===== Exports =====
+function exportPrint(doc, folder, presetName){
+  try{
+    var preset=null; try{ preset = app.pdfExportPresets.itemByName(presetName); if (!preset.isValid) preset=null; }catch(_){}
+    var f=new File(folder.fsName + "/" + withoutExt(doc.name) + "_PRINT.pdf");
+    if (preset) doc.exportFile(ExportFormat.PDF_TYPE, f, false, preset); else doc.exportFile(ExportFormat.PDF_TYPE, f);
+  }catch(e){}
+}
+function exportInteractive(doc, folder){
+  try{
+    app.pdfExportPreferences.pageRange = PageRange.ALL_PAGES;
+    var f=new File(folder.fsName + "/" + withoutExt(doc.name) + "_DIGITAL.pdf");
+    doc.exportFile(ExportFormat.INTERACTIVE_PDF, f);
+  }catch(e){}
+}
+function doPackage(doc, folder){
+  try{
+    var pkg=new Folder(folder.fsName + "/PACKAGE"); if (!pkg.exists) pkg.create();
+    doc.packageForPrint(pkg,true,true,true,true,true,true,true,true,true);
+  }catch(e){}
+}
+
+})();
