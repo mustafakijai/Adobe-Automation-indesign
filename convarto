@@ -1,0 +1,436 @@
+#target indesign
+/* Brand + Fonts + Image Replacer — Compact Dark (Multi-Colors, Content-Aware Fit, No Strokes)
+   • Fixed top/bottom UI logos (set paths below)
+   • Colors: unlimited HEX swatches for SHAPES ONLY (never graphic frames)
+   • Apply modes: Single / Alternate / Random / By Label (label must equal swatch name)
+   • Fonts: apply to all text frames (family or Family\tStyle)
+   • Images: replace in graphic frames (label → link → sequential/random) + Content-Aware Fit
+   InDesign 2021–2025
+   Copyright Mustafa Khan (428769)
+*/
+
+(function () {
+
+  // ====== SET YOUR UI LOGO IMAGES HERE ======
+  var TOP_LOGO_PATH    = "/Users/mustafa.khan/Library/CloudStorage/OneDrive-JLL/Desktop/1. New Automation AI Advance_New/logo.png";     // ← change
+  var BOTTOM_LOGO_PATH = "/Users/mustafa.khan/Library/CloudStorage/OneDrive-JLL/Desktop/1. New Automation AI Advance_New/IMG_01.png";  // ← change
+  // ==========================================
+
+  var HOME_JSX_PATH = "/Users/mustafa.khan/Library/CloudStorage/OneDrive-JLL/Desktop/2025 Launch Ready/Master_Panel_Final_090.jsx"; // Adjust to your Monarch home script path
+
+  var COLOR_THEMES = [
+    { name: "Space",    rgb: [0, 62, 81] },
+    { name: "Midnight", rgb: [19, 30, 41] },
+    { name: "Sand",     rgb: [224, 198, 173] },
+    { name: "Ocean",    rgb: [188, 222, 230] }
+  ];
+  var FONT_OPTIONS = ["Source Sans Pro", "Roboto", "Helvetica", "Times New Roman"];
+  var IMG_RX = /\.(jpg|jpeg|png|tif|tiff|gif|bmp|psd|ai|eps|pdf)$/i;
+
+  // ----- Color helpers
+  function ensureRGBColor(doc, name, rgb){
+    try{
+      var c = doc.colors.itemByName(name);
+      var ok = true; try{ c.space; }catch(_){ ok = false; }
+      if(!ok){
+        c = doc.colors.add({name:name, model:ColorModel.PROCESS, space:ColorSpace.RGB, colorValue:rgb});
+      } else {
+        c.model = ColorModel.PROCESS; c.space = ColorSpace.RGB; c.colorValue = rgb;
+      }
+      return c;
+    }catch(_){ return null; }
+  }
+  function clampHex(h){
+    if(!h) return null; h=(""+h).replace(/^\s+|\s+$/g,"");
+    if(h.charAt(0)==="#") h=h.slice(1);
+    if(h.length===3) h=h.replace(/./g,function(x){return x+x;});
+    if(!/^[0-9a-fA-F]{6}$/.test(h)) return null;
+    return "#"+h.toUpperCase();
+  }
+  function hexToRGB(h){
+    h=clampHex(h); if(!h) return null;
+    return [parseInt(h.substr(1,2),16), parseInt(h.substr(3,2),16), parseInt(h.substr(5,2),16)];
+  }
+  function rgbToHex(rgb){
+    function th(v){var s=v.toString(16).toUpperCase(); return (s.length<2?"0":"")+s;}
+    return "#"+th(rgb[0])+th(rgb[1])+th(rgb[2]);
+  }
+
+  // ----- Frame/shape helpers
+  function isPlacedGraphic(it){ try{ return (it.allGraphics&&it.allGraphics.length)||(it.images&&it.images.length); }catch(_){ return false; } }
+  function isGraphicFrameTool(it){ try{
+      if(typeof ContentType==="undefined") return false;
+      return it && it.hasOwnProperty("contentType") && it.contentType===ContentType.GRAPHIC_TYPE;
+    }catch(_){ return false; } }
+  function isShapeClass(it){ try{ var n=it && it.constructor? it.constructor.name : ""; return /Rectangle|Polygon|Oval|GraphicLine/.test(n); }catch(_){ return false; } }
+  function isShapePaintTarget(it){ return isShapeClass(it) && !isGraphicFrameTool(it) && !isPlacedGraphic(it); }
+
+  function collectItems(doc, selectionOnly, filterFn){
+    var out=[], src=(selectionOnly && app.selection.length)? app.selection : doc.allPageItems;
+    function visit(it){ try{
+      if(it.pageItems && it.pageItems.length){ for(var j=0;j<it.pageItems.length;j++) visit(it.pageItems[j]); }
+      else { if(!filterFn || filterFn(it)) out.push(it); }
+    }catch(_){ } }
+    for(var i=0;i<src.length;i++) visit(src[i]);
+    return out;
+  }
+
+  function removeStrokesEverywhere(doc, selOnly){
+    var none=null; try{ none=doc.swatches.itemByName("None"); }catch(_){}
+    var all=collectItems(doc, selOnly, function(){return true;});
+    for(var i=0;i<all.length;i++){ try{ if(none && all[i].hasOwnProperty("strokeColor")) all[i].strokeColor=none; }catch(_){} }
+  }
+
+  // Multi-color fill logic
+  function applyFillMulti(doc, selOnly, swatches, mode){
+    if(!swatches || !swatches.length) return;
+    var shapes=collectItems(doc, selOnly, isShapePaintTarget);
+    if(!shapes.length) return;
+
+    // sanitize swatches (some may be null if creation failed)
+    var valid = []; for(var s=0;s<swatches.length;s++){ try{ if(swatches[s] && swatches[s].isValid) valid.push(swatches[s]); }catch(_){ } }
+    if(!valid.length) return;
+
+    // helpers
+    function pickByLabel(item){
+      var lbl = (item.label||"").toLowerCase();
+      for(var i=0;i<valid.length;i++){
+        try{ if(String(valid[i].name).toLowerCase()===lbl) return valid[i]; }catch(_){}
+      }
+      return valid[0]; // fallback
+    }
+    function rng(max){ return Math.floor(Math.random()*max); }
+
+    var altIdx=0;
+    for(var i=0;i<shapes.length;i++){
+      try{
+        var sw = valid[0];
+        switch(mode){
+          case "ALT": sw = valid[altIdx % valid.length]; altIdx++; break;
+          case "RND": sw = valid[rng(valid.length)]; break;
+          case "LBL": sw = pickByLabel(shapes[i]); break;
+          case "SGL":
+          default:    sw = valid[0]; break;
+        }
+        if(sw) shapes[i].fillColor = sw;
+      }catch(_){}
+    }
+  }
+
+  // ----- Fonts
+  function applyFontToAllTextFrames(doc, fontName){
+    try{
+      var fnt=null; try{ fnt=app.fonts.itemByName(fontName); }catch(_){}
+      if((!fnt||fnt.isValid===false) && fontName.indexOf("\t")===-1){ try{ fnt=app.fonts.itemByName(fontName+"\tRegular"); }catch(_){} }
+      var tfs=doc.textFrames;
+      for(var i=0;i<tfs.length;i++){ var paras=tfs[i].paragraphs;
+        for(var j=0;j<paras.length;j++){ try{ if(fnt && fnt.isValid!==false) paras[j].appliedFont=fnt; }catch(_){} } }
+    }catch(e){ alert("Font error: "+e.message); }
+  }
+
+  // ----- Image replacer
+  function listImageFiles(folder){ if(!folder||!folder.exists) return []; return folder.getFiles(function(f){ return (f instanceof File)&&IMG_RX.test(f.name); }); }
+  function basenameNoExt(f){ return f && f.name ? f.name.replace(/\.[^\.]+$/,'').toLowerCase() : ""; }
+  function fitGraphicSmart(frame, mode, useCAF){
+    try{
+      if(useCAF){ try{ frame.fit(FitOptions.CONTENT_AWARE_FIT); return; }catch(_){ } }
+      switch(mode){
+        case "FILL_PROP":  frame.fit(FitOptions.FILL_PROPORTIONALLY); break;
+        case "FIT_PROP":   frame.fit(FitOptions.PROPORTIONALLY); break;
+        case "CNT_TO_FRM": frame.fit(FitOptions.CONTENT_TO_FRAME); break;
+        case "FRM_TO_CNT": frame.fit(FitOptions.FRAME_TO_CONTENT); break;
+        default:           frame.fit(FitOptions.FILL_PROPORTIONALLY);
+      }
+    }catch(_){}
+  }
+  function graphicFrames(doc, selOnly, includeEmpty){
+    return collectItems(doc, selOnly, function(it){
+      if(!isGraphicFrameTool(it)) return false;
+      if(!includeEmpty && !isPlacedGraphic(it)) return false;
+      return true;
+    });
+  }
+  function replaceImagesFromFolder(doc, folder, opt, onTick){
+    opt=opt||{};
+    var includeEmpty=!!opt.includeEmpty, selOnly=!!opt.selectionOnly, matchByLabel=!!opt.matchByLabel,
+        thenByLink=!!opt.thenByLinkName, randomize=!!opt.randomize, fitMode=opt.fitMode||"FILL_PROP",
+        useCAF=!!opt.useContentAware;
+
+    var files=listImageFiles(folder);
+    if(!files.length) return {relinked:0, placed:0, unmatched:0, total:0};
+
+    var byName={}; for(var i=0;i<files.length;i++) byName[basenameNoExt(files[i])]=files[i];
+    var ordered=files.slice(0);
+    if(randomize){ for(var r=ordered.length-1;r>0;r--){ var s=Math.floor(Math.random()*(r+1)); var t=ordered[r]; ordered[r]=ordered[s]; ordered[s]=t; } }
+    var next=0, used={}; function nextFile(){ if(next>=ordered.length) next=0; return ordered[next++]; }
+
+    var frames=graphicFrames(doc, selOnly, includeEmpty);
+    var none=null; try{ none=doc.swatches.itemByName("None"); }catch(_){}
+    var stats={relinked:0, placed:0, unmatched:0, total:frames.length};
+
+    for(var f=0; f<frames.length; f++){
+      var fr=frames[f], target=null;
+
+      if(matchByLabel){ var lbl=(fr.label||"").toLowerCase(); if(lbl && byName[lbl]) target=byName[lbl]; }
+      if(!target && thenByLink && fr.allGraphics && fr.allGraphics.length){
+        try{ var g=fr.allGraphics[0]; if(g.itemLink && g.itemLink.name){ var base=g.itemLink.name.replace(/\.[^\.]+$/,'').toLowerCase(); if(byName[base]) target=byName[base]; } }catch(_){}
+      }
+      if(!target){
+        var tries=0, cand; do{ cand=nextFile(); tries++; if(!used[cand.fsName.toLowerCase()]){ target=cand; break; } }while(tries<ordered.length+1);
+        if(target) used[target.fsName.toLowerCase()]=true;
+      }
+
+      try{
+        if(fr.allGraphics && fr.allGraphics.length){
+          if(target){ try{ fr.allGraphics[0].itemLink.relink(target); }catch(_){}
+            fitGraphicSmart(fr, fitMode, useCAF); stats.relinked++; } else stats.unmatched++;
+        } else if(includeEmpty){
+          if(target){ fr.place(target); fitGraphicSmart(fr, fitMode, useCAF); stats.placed++; } else stats.unmatched++;
+        }
+      }catch(_){}
+      try{ if(none && fr.hasOwnProperty("strokeColor")) fr.strokeColor=none; }catch(_){}
+      if(onTick) onTick(f+1, frames.length);
+    }
+    return stats;
+  }
+
+  // ----- UI (dark + compact, fixed images) with MULTI-COLOR controls
+  try{
+    var w = new Window('palette', 'Convarto Pro', undefined);
+    w.orientation='column'; w.alignChildren=['fill','top']; w.margins=10; w.spacing=8;
+
+    var bg  = w.graphics.newBrush(w.graphics.BrushType.SOLID_COLOR, [0.09,0.12,0.16,1]);
+    var pbg = w.graphics.newBrush(w.graphics.BrushType.SOLID_COLOR, [0.12,0.16,0.20,1]);
+    w.graphics.backgroundColor = bg;
+
+    // Top Header with Home Button and Logo
+    var header = w.add('group'); header.orientation = 'row'; header.alignChildren = ['fill', 'center']; header.spacing = 6;
+    header.alignment = 'fill';
+
+    // Home Button (small icon-like button with house symbol)
+    var bHome = header.add('button', [0,0,30,26], '\u2302'); // Unicode house symbol as icon
+    bHome.helpTip = "Go Home";
+    bHome.onClick = function() {
+      try {
+        w.close();
+        var homeFile = new File(HOME_JSX_PATH);
+        if (homeFile.exists) {
+          app.doScript(homeFile, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, "Open Home");
+        } else {
+          alert("Home script not found: " + HOME_JSX_PATH);
+        }
+      } catch(e) {
+        alert("Failed to open Home: " + e.message);
+      }
+    };
+
+    // Top logo image
+    var logoTopGroup = header.add('group'); logoTopGroup.orientation = 'column'; logoTopGroup.alignChildren = 'center';
+    var logoTopFile = new File(TOP_LOGO_PATH);
+    if (logoTopFile.exists) {
+      var logoTop = logoTopGroup.add('image', undefined, logoTopFile);
+      logoTop.preferredSize = [40, 40];
+    } else {
+      var logoTopText = logoTopGroup.add('statictext', undefined, "Logo");
+      logoTopText.graphics.font = ScriptUI.newFont("dialog", "bold", 12);
+    }
+
+    // Spacer for alignment
+    var spacer = header.add('group'); spacer.alignment = 'fill';
+
+    var p = w.add('panel', undefined, undefined, {borderStyle:'etched'});
+    p.margins=10; p.spacing=6; p.alignChildren=['fill','top']; p.minimumSize.width=460;
+    p.graphics.backgroundColor = pbg;
+
+    // Quick theme loader
+    var g1 = p.add('group'); g1.orientation='row'; g1.spacing=6;
+    g1.add('statictext', undefined, 'Theme:').preferredSize=[60,18];
+    var ddTheme = g1.add('dropdownlist', undefined); ddTheme.preferredSize=[160,22];
+    for (var i=0;i<COLOR_THEMES.length;i++) ddTheme.add('item', COLOR_THEMES[i].name); ddTheme.selection=0;
+    var btnLoad = g1.add('button', undefined, 'Load → First'); btnLoad.preferredSize=[120,22];
+
+    // --- MULTI-COLOR EDITOR ---
+    var cp = p.add('panel', undefined, 'Colors'); cp.margins=8; cp.spacing=6; cp.alignChildren=['fill','top'];
+    cp.graphics.backgroundColor = pbg;
+
+    var hdr = cp.add('group'); hdr.orientation='row'; hdr.spacing=6;
+    hdr.add('statictext', undefined, 'HEX').preferredSize=[90,18];
+    hdr.add('statictext', undefined, 'Name').preferredSize=[140,18];
+
+    var listWrap = cp.add('group'); listWrap.orientation='column'; listWrap.spacing=4; listWrap.alignChildren='fill';
+
+    function makeColorRow(hex, name){
+      var g = listWrap.add('group'); g.orientation='row'; g.spacing=6; g.alignChildren=['left','center'];
+      var eHex  = g.add('edittext', undefined, hex||'#003E51'); eHex.characters=10;
+      var eName = g.add('edittext', undefined, name||'Brand_Primary'); eName.characters=18;
+      g.getData = function(){ return { hex:eHex.text, name:eName.text }; };
+      g.removeSafely = function(){ try{ listWrap.remove(g); }catch(_){ } w.layout.layout(true); };
+      return g;
+    }
+
+    // defaults (two rows)
+    var r1 = makeColorRow('#003E51','Brand_Primary');
+    var r2 = makeColorRow('#000000','Brand_Secondary');
+
+    var rowBtns = cp.add('group'); rowBtns.orientation='row'; rowBtns.spacing=8;
+    var btnAdd = rowBtns.add('button', undefined, '+ Add'); btnAdd.preferredSize=[80,22];
+    var btnDel = rowBtns.add('button', undefined, '– Remove Last'); btnDel.preferredSize=[120,22];
+
+    btnAdd.onClick = function(){ makeColorRow('#FF4040','Accent'); w.layout.layout(true); };
+    btnDel.onClick = function(){
+      if(listWrap.children && listWrap.children.length>0){
+        listWrap.children[listWrap.children.length-1].removeSafely();
+      }
+    };
+
+    // Apply mode
+    var gm = cp.add('group'); gm.orientation='row'; gm.spacing=10;
+    gm.add('statictext', undefined, 'Apply mode:').preferredSize=[80,18];
+    var ddMode = gm.add('dropdownlist', undefined, ['Single','Alternate','Random','By Label']); ddMode.selection = 0;
+    var lblInfo = cp.add('statictext', undefined, '“By Label” uses the page item label to match a swatch name.'); lblInfo.characters=50;
+
+    // Legacy single HEX (kept as convenience, loads theme → first row)
+    var gHex = p.add('group'); gHex.orientation='row'; gHex.spacing=6;
+    gHex.add('statictext', undefined, 'Primary HEX:').preferredSize=[80,18];
+    var etHex = gHex.add('edittext', undefined, '#003E51'); etHex.characters=10;
+
+    // Fonts
+    p.add('statictext', undefined, 'Font for all text frames:');
+    var ddFont = p.add('dropdownlist', undefined); ddFont.preferredSize=[240,22];
+    for (var j=0;j<FONT_OPTIONS.length;j++) ddFont.add('item', FONT_OPTIONS[j]); ddFont.selection=0;
+
+    var scope = p.add('group'); scope.orientation='row'; scope.spacing=10;
+    var chkSelOnly = scope.add('checkbox', undefined, 'Selection only'); chkSelOnly.value=false;
+
+    // Image replacer panel
+    var ip = p.add('panel', undefined, 'Image Replacer'); ip.margins=8; ip.spacing=6; ip.alignChildren=['left','top'];
+    ip.graphics.backgroundColor = pbg;
+
+    var ig1 = ip.add('group'); ig1.orientation='row'; ig1.spacing=6;
+    var btnPick = ig1.add('button', undefined, 'Images Folder'); btnPick.preferredSize=[110,22];
+    var lblPath = ig1.add('statictext', undefined, '(none)'); lblPath.characters=28; var IMG_FOLDER=null;
+    btnPick.onClick=function(){ var f=Folder.selectDialog("Select folder with replacement images"); if(f){ IMG_FOLDER=f; lblPath.text=File.decode(f.fsName);} };
+
+    var ig2 = ip.add('group'); ig2.orientation='row'; ig2.spacing=10;
+    var chkEnable = ig2.add('checkbox', undefined, 'Enable'); chkEnable.value=false;
+    var chkIncludeEmpty = ig2.add('checkbox', undefined, 'Include empty frames'); chkIncludeEmpty.value=false;
+
+    var ig3 = ip.add('group'); ig3.orientation='row'; ig3.spacing=10;
+    var chkByLabel = ig3.add('checkbox', undefined, 'Match label'); chkByLabel.value=true;
+    var chkByLink  = ig3.add('checkbox', undefined, 'Then link name'); chkByLink.value=true;
+
+    var ig4 = ip.add('group'); ig4.orientation='row'; ig4.spacing=10;
+    ig4.add('statictext', undefined, 'Order:');
+    var rbSeq = ig4.add('radiobutton', undefined, 'Seq'); rbSeq.value=true;
+    var rbRnd = ig4.add('radiobutton', undefined, 'Rnd');
+
+    var ig5 = ip.add('group'); ig5.orientation='row'; ig5.spacing=10;
+    ig5.add('statictext', undefined, 'Fit:');
+    var ddFit = ig5.add('dropdownlist', undefined, ['Fill Prop','Fit Prop','Content→Frame','Frame→Content']); ddFit.selection=0;
+    var chkCAF = ig5.add('checkbox', undefined, 'Content-Aware'); chkCAF.value=true;
+
+    var run = w.add('group'); run.alignment='fill'; run.spacing=8;
+    var btnApply = run.add('button', undefined, 'Generate'); btnApply.preferredSize=[140,26];
+    var status = run.add('statictext', undefined, 'Ready'); status.alignment='fill';
+    var pb = w.add('progressbar', undefined, 0, 100); pb.preferredSize=[undefined,8];
+
+    // Bottom logo image
+    (function(){
+      var g = w.add('group'); g.alignment='fill';
+      var f = new File(BOTTOM_LOGO_PATH);
+      if (f.exists) g.add('image', undefined, f);
+    })();
+
+    // Events
+    btnLoad.onClick=function(){
+      try{
+        var t=COLOR_THEMES[ddTheme.selection?ddTheme.selection.index:0];
+        etHex.text=rgbToHex(t.rgb); // legacy quick slot
+        // also push into first color row for convenience
+        if(listWrap.children && listWrap.children.length){
+          try{ listWrap.children[0].children[0].text = rgbToHex(t.rgb); }catch(_){}
+          try{ listWrap.children[0].children[1].text = t.name; }catch(_){}
+        }
+      }catch(e){ alert("Preset load error: "+e.message); }
+    };
+
+    btnApply.onClick=function(){
+      try{
+        if(app.documents.length===0){ alert("Open a document first."); return; }
+        var doc=app.activeDocument;
+
+        pb.value=0; status.text="Starting…"; w.update();
+
+        // Build swatches from rows
+        var rows = listWrap.children || [];
+        if(!rows.length){ rows = [ makeColorRow('#003E51','Brand_Primary') ]; }
+        var swatches = [];
+        for(var i=0;i<rows.length;i++){
+          var d = rows[i].getData();
+          var hx = clampHex(d.hex);
+          if(!hx) continue;
+          var rgb = hexToRGB(hx);
+          var sw  = ensureRGBColor(doc, d.name||('Color_'+(i+1)), rgb);
+          if(sw) swatches.push(sw);
+        }
+        if(!swatches.length){
+          // fallback: use legacy single HEX slot
+          var pHex=clampHex(etHex.text);
+          if(!pHex){ alert("Please add at least one valid HEX color."); return; }
+          var pRGB=hexToRGB(pHex);
+          swatches.push(ensureRGBColor(doc,"Brand_Primary",pRGB));
+        }
+
+        status.text="Removing strokes…"; pb.value=10; w.update();
+        removeStrokesEverywhere(doc, !!chkSelOnly.value);
+
+        status.text="Applying fills (shapes)…"; pb.value=30; w.update();
+        var modeIdx = ddMode.selection ? ddMode.selection.index : 0;
+        var modeKey = (["SGL","ALT","RND","LBL"])[modeIdx] || "SGL";
+        applyFillMulti(doc, !!chkSelOnly.value, swatches, modeKey);
+
+        status.text="Applying fonts…"; pb.value=55; w.update();
+        var chosenFont = ddFont.selection ? ddFont.selection.text : FONT_OPTIONS[0];
+        applyFontToAllTextFrames(doc, chosenFont);
+
+        if (chkEnable.value){
+          if(!IMG_FOLDER){ alert("Image replacement is enabled, but no image folder selected."); }
+          else{
+            status.text="Replacing images…"; pb.value=70; w.update();
+            var fitMap=["FILL_PROP","FIT_PROP","CNT_TO_FRM","FRM_TO_CNT"];
+            var stats=replaceImagesFromFolder(doc, IMG_FOLDER, {
+              includeEmpty:  !!chkIncludeEmpty.value,
+              selectionOnly: !!chkSelOnly.value,
+              matchByLabel:  !!chkByLabel.value,
+              thenByLinkName:!!chkByLink.value,
+              randomize:     !!rbRnd.value,
+              fitMode:       fitMap[ ddFit.selection ? ddFit.selection.index : 0 ],
+              useContentAware: !!chkCAF.value
+            }, function(done,total){
+              pb.value = 70 + Math.round((total ? done/total : 1)*25);
+              status.text = "Replacing images… " + done + " / " + total;
+              try{ w.update(); }catch(_){}
+            });
+            alert("Images updated.\nRelinked: "+stats.relinked+"\nPlaced in empty: "+stats.placed+"\nUnmatched: "+stats.unmatched);
+          }
+        }
+
+        pb.value=100;
+        status.text="Done ✔  Colors: "+swatches.length+"  Font: "+chosenFont+"  (No strokes anywhere)";
+      }catch(e){ alert("Error: "+e.message); status.text="Error: "+e.message; }
+    };
+
+    w.center(); w.show();
+
+    // local function (closure) used above when no rows exist
+    function makeColorRow(hex, name){
+      var g = listWrap.add('group'); g.orientation='row'; g.spacing=6; g.alignChildren=['left','center'];
+      var eHex  = g.add('edittext', undefined, hex||'#003E51'); eHex.characters=10;
+      var eName = g.add('edittext', undefined, name||'Brand_Primary'); eName.characters=18;
+      g.getData = function(){ return { hex:eHex.text, name:eName.text }; };
+      g.removeSafely = function(){ try{ listWrap.remove(g); }catch(_){ } w.layout.layout(true); };
+      return g;
+    }
+
+  }catch(e){ alert("Init error: " + e.message); }
+})();
