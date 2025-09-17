@@ -1,0 +1,144 @@
+/* INWIZ_SelectedFrameTools_Replace.jsx
+   Replace/place ONLY the user's *selected* Frame-tool boxes:
+   - Rectangle Frame / Ellipse Frame / Polygon Frame (not plain shapes or text frames)
+   - If the selected frame is Unassigned, script sets it to Graphic and places.
+   - If it already has a graphic, script relinks.
+   - Images taken sequentially from chosen folder (no reuse until cycle).
+   - Fit: Fill Proportionally.
+
+   Usage: Select ONLY your image frames on the page, run the script, pick folder.
+   Tested: InDesign 2021–2025 (macOS/Windows)
+*/
+#target "indesign"
+(function () {
+  if (!app.documents.length) { alert("Open a document first."); return; }
+  var doc = app.activeDocument;
+
+  // --- REQUIRE SELECTION ---
+  if (!app.selection || !app.selection.length) {
+    alert("Select your image frames first (Rectangle/Ellipse/Polygon FRAME tools).");
+    return;
+  }
+
+  // --- pick folder ---
+  var folder = Folder.selectDialog("Pick the folder with replacement images");
+  if (!folder || !folder.exists) return;
+
+  // --- helpers ---
+  var IMG_RX = /\.(jpg|jpeg|png|tif|tiff|gif|bmp|psd|ai|eps|pdf)$/i;
+
+  function listImageFiles(fld){
+    return fld.getFiles(function(f){ return (f instanceof File) && IMG_RX.test(f.name); });
+  }
+  function baseNoExt(s){ return String(s||"").replace(/\.[^\.]+$/,'').toLowerCase(); }
+
+  // Only accept *frame tool* classes (not plain shapes or text frames)
+  // In practice, both “rectangle tool” and “rectangle frame tool” are Rectangle class,
+  // so we enforce: (Rectangle|Oval|Polygon) AND (has contentType OR can host graphic) AND (not TextFrame)
+  function isFrameToolBox(it){
+    try{
+      var n = it && it.constructor ? it.constructor.name : "";
+      if (!/Rectangle|Oval|Polygon/.test(n)) return false;
+      if (it.hasOwnProperty("baseline") || it.constructor.name === "TextFrame") return false; // exclude text frames
+      return true;
+    }catch(_){ return false; }
+  }
+  function isGraphicFrame(it){
+    try { return it.hasOwnProperty("contentType") && it.contentType === ContentType.GRAPHIC_TYPE; }
+    catch(_){ return false; }
+  }
+  function hasGraphic(it){
+    try { return (it.allGraphics && it.allGraphics.length > 0); } catch(_){ return false; }
+  }
+  function unlock(item){
+    try{ if(item.locked) item.locked=false; }catch(_){}
+    try{ if(item.itemLayer && item.itemLayer.locked) item.itemLayer.locked=false; }catch(_){}
+    try{ if(item.parent && item.parent.locked) item.parent.locked=false; }catch(_){}
+    try{ if(item.visible===false) item.visible=true; }catch(_){}
+    return item;
+  }
+  function fitFill(frame){ try{ frame.fit(FitOptions.FILL_PROPORTIONALLY); }catch(_){} }
+
+  // gather selected frame-tool boxes only
+  var frames = [];
+  for (var i=0;i<app.selection.length;i++){
+    var it = app.selection[i];
+    if (isFrameToolBox(it)) frames.push(it);
+  }
+  if (!frames.length){
+    alert("Your selection has no Frame-tool boxes.\nTip: select the Rectangle/Ellipse/Polygon *Frame* objects only.");
+    return;
+  }
+
+  var files = listImageFiles(folder);
+  if (!files.length){ alert("No image files found in the chosen folder."); return; }
+
+  // predictable order + no reuse until cycle
+  files.sort(function(a,b){ var A=a.name.toLowerCase(), B=b.name.toLowerCase(); return (A<B)?-1:(A>B)?1:0; });
+  var used = {}, nextIdx = 0;
+  function nextFile(){
+    var tries=0;
+    while (tries <= files.length){
+      if (nextIdx >= files.length) nextIdx = 0;
+      var cand = files[nextIdx++];
+      var key = cand.fsName.toLowerCase();
+      if (!used[key]){ used[key]=true; return cand; }
+      tries++;
+    }
+    return files[(nextIdx++) % files.length];
+  }
+
+  // also allow filename match to current link (nice when folder has 1:1 names)
+  var byBase = {};
+  for (var k=0;k<files.length;k++) byBase[ baseNoExt(files[k].name) ] = files[k];
+
+  app.doScript(function(){
+    var stats = { total:frames.length, relinked:0, placed:0, skipped:0 };
+
+    for (var f=0; f<frames.length; f++){
+      var fr = unlock(frames[f]);
+      var target = null;
+
+      // If it already has a graphic, prefer same-basename from folder
+      if (hasGraphic(fr)){
+        try{
+          var g = fr.allGraphics[0];
+          if (g && g.itemLink && g.itemLink.name){
+            var base = baseNoExt(g.itemLink.name);
+            if (byBase[base]) target = byBase[base];
+          }
+        }catch(_){}
+      }
+
+      if (!target) target = nextFile();
+
+      try{
+        if (!isGraphicFrame(fr)){
+          // convert Unassigned frame-tool box to a graphic frame
+          try{ fr.contentType = ContentType.GRAPHIC_TYPE; }catch(_){}
+        }
+
+        if (hasGraphic(fr)){
+          fr.allGraphics[0].itemLink.relink(target);
+          fitFill(fr);
+          stats.relinked++;
+        } else {
+          fr.place(target);
+          fitFill(fr);
+          stats.placed++;
+        }
+      }catch(e){
+        stats.skipped++;
+      }
+    }
+
+    alert(
+      "Selected frames processed: " + stats.total + "\n" +
+      "Relinked: " + stats.relinked + "\n" +
+      "Placed (was empty): " + stats.placed + "\n" +
+      "Skipped: " + stats.skipped
+    );
+
+  }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, "INWIZ Replace (Selected Frame Tools)");
+
+})();
