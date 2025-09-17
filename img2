@@ -1,0 +1,157 @@
+/* INWIZ_ImageBoxes_ReplaceFromFolder.jsx
+   Replace/Place images into ONLY image-capable boxes (Rect/Oval/Polygon):
+   - If selection exists: process only selected boxes.
+   - Else: process all image boxes in the document.
+   - Works on boxes WITH images (relink) and WITHOUT images (place).
+   - Matching: frame .label → existing link basename → sequential (no reuse until cycle).
+   - Fit: Fill Proportionally (auto).
+   - Safe: unlocks layers/items; OK inside groups/anchors.
+
+   Tested: InDesign 2021–2025 (Win/macOS)
+*/
+#target "indesign"
+
+(function () {
+  if (!app.documents.length) { alert("Open a document first."); return; }
+  var doc = app.activeDocument;
+
+  // Pick folder
+  var folder = Folder.selectDialog("Pick the folder containing the replacement images");
+  if (!folder || !folder.exists) { return; }
+
+  // --- helpers ---
+  var IMG_RX = /\.(jpg|jpeg|png|tif|tiff|gif|bmp|psd|ai|eps|pdf)$/i;
+
+  function listImageFiles(fld){
+    return fld.getFiles(function(f){ return (f instanceof File) && IMG_RX.test(f.name); });
+  }
+  function baseNoExt(s){ return String(s||"").replace(/\.[^\.]+$/,'').toLowerCase(); }
+
+  function isShapeBox(it){
+    try {
+      var n = it && it.constructor ? it.constructor.name : "";
+      // Only page items that can host placed graphics
+      return /Rectangle|Polygon|Oval/.test(n);
+    } catch (_) { return false; }
+  }
+  function hasPlacedGraphic(it){
+    try { return (it.allGraphics && it.allGraphics.length > 0); } catch(_) { return false; }
+  }
+  function canPlace(it){ return isShapeBox(it); }
+
+  function unlock(item){
+    try{ if(item.locked) item.locked=false; }catch(_){}
+    try{ if(item.itemLayer && item.itemLayer.locked) item.itemLayer.locked=false; }catch(_){}
+    try{ if(item.parent && item.parent.locked) item.parent.locked=false; }catch(_){}
+    try{ if(item.visible===false) item.visible=true; }catch(_){}
+    return item;
+  }
+  function fitFill(frame){
+    try{ frame.fit(FitOptions.FILL_PROPORTIONALLY); }catch(_){}
+  }
+
+  // Collect targets: only image-capable boxes
+  function collectTargets(){
+    var src = (app.selection && app.selection.length) ? app.selection : doc.allPageItems;
+    var out = [];
+    function visit(it){
+      try{
+        if (it.pageItems && it.pageItems.length){
+          for (var j=0;j<it.pageItems.length;j++) visit(it.pageItems[j]);
+        } else {
+          if (canPlace(it)) out.push(it);
+        }
+      }catch(_){}
+    }
+    for (var i=0;i<src.length;i++) visit(src[i]);
+    return out;
+  }
+
+  var files = listImageFiles(folder);
+  if (!files.length){ alert("No image files found in the chosen folder."); return; }
+
+  // filename → File map (lowercased, no ext)
+  var byBase = {};
+  for (var i=0;i<files.length;i++) byBase[ baseNoExt(files[i].name) ] = files[i];
+
+  // predictable order: sort by filename
+  files.sort(function(a,b){
+    var A=a.name.toLowerCase(), B=b.name.toLowerCase();
+    return (A<B)?-1:(A>B)?1:0;
+  });
+  var nextIdx = 0, used = {};
+  function nextFile(){
+    // no reuse until we cycle the whole folder
+    var tries = 0;
+    while (tries <= files.length){
+      if (nextIdx >= files.length) nextIdx = 0;
+      var cand = files[nextIdx++];
+      var key = cand.fsName.toLowerCase();
+      if (!used[key]){ used[key] = true; return cand; }
+      tries++;
+    }
+    // everything used once; start reusing in order
+    var f = files[nextIdx++ % files.length];
+    return f;
+  }
+
+  // Main
+  app.doScript(function(){
+    var targets = collectTargets();
+    if (!targets.length){ alert("No image-capable boxes found (Rect/Oval/Polygon)."); return; }
+
+    var stats = { total:targets.length, relinked:0, placed:0, skipped:0 };
+
+    for (var t=0; t<targets.length; t++){
+      var fr = unlock(targets[t]);
+      var fileToUse = null;
+
+      // 1) try frame label
+      try{
+        var lbl = (fr.label||"").toLowerCase();
+        if (lbl && byBase[lbl]) fileToUse = byBase[lbl];
+      }catch(_){}
+
+      // 2) if already has an image, try matching its basename
+      if (!fileToUse && hasPlacedGraphic(fr)){
+        try{
+          var g = fr.allGraphics[0];
+          if (g && g.itemLink && g.itemLink.name){
+            var base = baseNoExt(g.itemLink.name);
+            if (byBase[base]) fileToUse = byBase[base];
+          }
+        }catch(_){}
+      }
+
+      // 3) fallback sequential
+      if (!fileToUse) fileToUse = nextFile();
+
+      // Apply: relink if placed, else place
+      try{
+        if (hasPlacedGraphic(fr)){
+          fr.allGraphics[0].itemLink.relink(fileToUse);
+          fitFill(fr);
+          stats.relinked++;
+        } else {
+          // ensure frame is a graphic container then place
+          try{ if(fr.hasOwnProperty("contentType")) fr.contentType = ContentType.GRAPHIC_TYPE; }catch(_){}
+          fr.place(fileToUse);
+          fitFill(fr);
+          stats.placed++;
+        }
+      } catch (e){
+        stats.skipped++;
+      }
+    }
+
+    alert(
+      "Image replacement complete.\n\n" +
+      "Boxes scanned:  " + stats.total + "\n" +
+      "Relinked:       " + stats.relinked + "\n" +
+      "Placed (empty): " + stats.placed + "\n" +
+      "Skipped:        " + stats.skipped
+    );
+
+  }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, "INWIZ Replace/Place From Folder");
+
+})();
