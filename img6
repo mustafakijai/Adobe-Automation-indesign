@@ -1,0 +1,102 @@
+/* INWIZ_AllGraphicFrames_Replace.jsx
+   Auto-select and replace ALL image frames in the document:
+   - Targets ONLY true Graphic Frames (Rectangle Frame, Ellipse Frame, Polygon Frame)
+   - If frame already has image → relink
+   - If frame is empty → place
+   - Matching priority: label → existing link basename → sequential order
+   - Fit: Fill Proportionally
+   Tested InDesign 2021–2025
+*/
+#target "indesign"
+(function(){
+  if (!app.documents.length){ alert("Open a document first."); return; }
+  var doc = app.activeDocument;
+
+  // Pick folder
+  var folder = Folder.selectDialog("Pick folder with replacement images");
+  if (!folder || !folder.exists) return;
+
+  // Helpers
+  var IMG_RX = /\.(jpg|jpeg|png|tif|tiff|gif|bmp|psd|ai|eps|pdf)$/i;
+  function listImageFiles(fld){ return fld.getFiles(function(f){ return (f instanceof File) && IMG_RX.test(f.name); }); }
+  function baseNoExt(s){ return String(s||"").replace(/\.[^\.]+$/,'').toLowerCase(); }
+  function isGraphicFrame(it){
+    try { return it.hasOwnProperty("contentType") && it.contentType === ContentType.GRAPHIC_TYPE; }
+    catch(_){ return false; }
+  }
+  function hasGraphic(it){ try{ return (it.allGraphics && it.allGraphics.length>0); }catch(_){ return false; } }
+  function unlock(it){ try{ if(it.locked) it.locked=false; }catch(_){}
+                        try{ if(it.itemLayer && it.itemLayer.locked) it.itemLayer.locked=false; }catch(_){}
+                        try{ if(it.parent && it.parent.locked) it.parent.locked=false; }catch(_){}
+                        return it; }
+  function fitFill(frame){ try{ frame.fit(FitOptions.FILL_PROPORTIONALLY); }catch(_){ } }
+
+  // Collect ALL graphic frames in doc
+  var frames = [];
+  function visit(it){
+    try{
+      if (it.pageItems && it.pageItems.length){
+        for (var j=0;j<it.pageItems.length;j++) visit(it.pageItems[j]);
+      } else {
+        if (isGraphicFrame(it)) frames.push(it);
+      }
+    }catch(_){}
+  }
+  visit(doc);
+
+  if (!frames.length){ alert("No graphic frames found in this document."); return; }
+
+  // Image pool
+  var files = listImageFiles(folder);
+  if (!files.length){ alert("No images in folder."); return; }
+  files.sort(function(a,b){ return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1; });
+
+  var byBase = {};
+  for (var i=0;i<files.length;i++) byBase[ baseNoExt(files[i].name) ] = files[i];
+
+  var used={}, nextIdx=0;
+  function nextFile(){
+    var tries=0;
+    while (tries <= files.length){
+      if (nextIdx >= files.length) nextIdx=0;
+      var cand = files[nextIdx++];
+      var key = cand.fsName.toLowerCase();
+      if (!used[key]){ used[key]=true; return cand; }
+      tries++;
+    }
+    return files[(nextIdx++) % files.length];
+  }
+
+  // Main
+  app.doScript(function(){
+    var stats={total:frames.length,relinked:0,placed:0,skipped:0};
+    for (var i=0;i<frames.length;i++){
+      var fr=unlock(frames[i]), target=null;
+
+      // label
+      try{ var lbl=(fr.label||"").toLowerCase(); if(lbl && byBase[lbl]) target=byBase[lbl]; }catch(_){}
+      // existing link name
+      if(!target && hasGraphic(fr)){
+        try{ var g=fr.allGraphics[0];
+             if(g.itemLink){ var base=baseNoExt(g.itemLink.name); if(byBase[base]) target=byBase[base]; } }catch(_){}
+      }
+      // sequential fallback
+      if(!target) target=nextFile();
+
+      try{
+        if(hasGraphic(fr)){
+          fr.allGraphics[0].itemLink.relink(target);
+          fitFill(fr); stats.relinked++;
+        } else {
+          fr.place(target); fitFill(fr); stats.placed++;
+        }
+      }catch(_){ stats.skipped++; }
+    }
+
+    alert("Frames: "+stats.total+
+          "\nRelinked: "+stats.relinked+
+          "\nPlaced: "+stats.placed+
+          "\nSkipped: "+stats.skipped);
+  }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, "Replace All Frames");
+
+})();
