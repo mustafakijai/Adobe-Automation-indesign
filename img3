@@ -1,0 +1,152 @@
+/* INWIZ_Replace_GraphicFrames_Only.jsx
+   Replace ONLY true Graphic Frames (Frame tools) — not plain shapes.
+   - If selection exists: only selected graphic frames.
+   - Else: all graphic frames in document.
+   - Relinks if filled; places if empty.
+   - Match: frame .label → existing link basename → sequential (no reuse until cycle).
+   - Fit: Fill Proportionally.
+   Tested: InDesign 2021–2025 (Win/macOS).
+*/
+#target "indesign"
+
+(function(){
+  if (!app.documents.length){ alert("Open a document first."); return; }
+  var doc = app.activeDocument;
+
+  // Pick images folder
+  var folder = Folder.selectDialog("Pick folder with replacement images");
+  if (!folder || !folder.exists) return;
+
+  // ---- helpers ----
+  var IMG_RX = /\.(jpg|jpeg|png|tif|tiff|gif|bmp|psd|ai|eps|pdf)$/i;
+
+  function listImageFiles(fld){
+    return fld.getFiles(function(f){ return (f instanceof File) && IMG_RX.test(f.name); });
+  }
+  function baseNoExt(s){ return String(s||"").replace(/\.[^\.]+$/,'').toLowerCase(); }
+
+  // TRUE graphic frame = item has contentType and equals GRAPHIC_TYPE
+  function isGraphicFrame(it){
+    try { return it && it.hasOwnProperty("contentType") && it.contentType === ContentType.GRAPHIC_TYPE; }
+    catch(_){ return false; }
+  }
+  function hasGraphic(it){
+    try { return (it.allGraphics && it.allGraphics.length > 0); }
+    catch(_){ return false; }
+  }
+  function unlock(item){
+    try{ if(item.locked) item.locked=false; }catch(_){}
+    try{ if(item.itemLayer && item.itemLayer.locked) item.itemLayer.locked=false; }catch(_){}
+    try{ if(item.parent && item.parent.locked) item.parent.locked=false; }catch(_){}
+    try{ if(item.visible===false) item.visible=true; }catch(_){}
+    return item;
+  }
+  function fitFill(frame){
+    try{ frame.fit(FitOptions.FILL_PROPORTIONALLY); }catch(_){}
+  }
+
+  // Collect targets: ONLY true graphic frames; include empty + filled
+  function collectTargets(){
+    var src = (app.selection && app.selection.length) ? app.selection : doc.allPageItems;
+    var out = [];
+    function visit(it){
+      try{
+        if (it.pageItems && it.pageItems.length){
+          for (var j=0;j<it.pageItems.length;j++) visit(it.pageItems[j]);
+        } else {
+          if (isGraphicFrame(it)) out.push(it);
+        }
+      }catch(_){}
+    }
+    for (var i=0;i<src.length;i++) visit(src[i]);
+    return out;
+  }
+
+  // Build image pool
+  var files = listImageFiles(folder);
+  if (!files.length){ alert("No image files found in the selected folder."); return; }
+
+  files.sort(function(a,b){
+    var A=a.name.toLowerCase(), B=b.name.toLowerCase();
+    return (A<B)?-1:(A>B)?1:0;
+  });
+
+  var byBase = {};
+  for (var i=0;i<files.length;i++) byBase[ baseNoExt(files[i].name) ] = files[i];
+
+  var used = {}, nextIdx = 0;
+  function nextFile(){
+    // don't reuse until all used once
+    var tries=0;
+    while (tries <= files.length){
+      if (nextIdx >= files.length) nextIdx = 0;
+      var cand = files[nextIdx++];
+      var key = cand.fsName.toLowerCase();
+      if (!used[key]){ used[key]=true; return cand; }
+      tries++;
+    }
+    // cycle again if needed
+    return files[(nextIdx++) % files.length];
+  }
+
+  // ----- main -----
+  app.doScript(function(){
+    var frames = collectTargets();
+    if (!frames.length){
+      alert("No true Graphic Frames found.\n(Use the Frame tools, or set Object > Content > Graphic.)");
+      return;
+    }
+
+    var stats = { total:frames.length, relinked:0, placed:0, skipped:0 };
+
+    for (var i=0;i<frames.length;i++){
+      var fr = unlock(frames[i]);
+      var target = null;
+
+      // 1) frame label (no extension)
+      try{
+        var lbl = (fr.label||"").toLowerCase();
+        if (lbl && byBase[lbl]) target = byBase[lbl];
+      }catch(_){}
+
+      // 2) existing link base name
+      if (!target && hasGraphic(fr)){
+        try{
+          var g = fr.allGraphics[0];
+          if (g && g.itemLink && g.itemLink.name){
+            var base = baseNoExt(g.itemLink.name);
+            if (byBase[base]) target = byBase[base];
+          }
+        }catch(_){}
+      }
+
+      // 3) sequential
+      if (!target) target = nextFile();
+
+      // apply
+      try{
+        if (hasGraphic(fr)){
+          fr.allGraphics[0].itemLink.relink(target);
+          fitFill(fr);
+          stats.relinked++;
+        } else {
+          // already a graphic frame → safe to place
+          fr.place(target);
+          fitFill(fr);
+          stats.placed++;
+        }
+      }catch(_){
+        stats.skipped++;
+      }
+    }
+
+    alert(
+      "Graphic frames processed: " + stats.total + "\n" +
+      "Relinked: " + stats.relinked + "\n" +
+      "Placed (was empty): " + stats.placed + "\n" +
+      "Skipped: " + stats.skipped
+    );
+
+  }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, "INWIZ Replace Graphic Frames Only");
+
+})();
