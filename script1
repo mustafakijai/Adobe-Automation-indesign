@@ -1,0 +1,402 @@
+/* 
+  UltraDetect_CLEAN_PLUS.jsx
+  Mr khan — Top-class label detection + CLEAN Word export (with live content)
+  - Detects labels on: TextFrame, Table, Group, Rectangle, Oval, Polygon
+  - Group logic: if any descendant TextFrame/Table -> TEXT, else if any graphic frame -> IMAGE
+  - Output: strictly page-ordered, top->bottom, left->right; super-simple RTF blocks.
+  - Prefills: TEXT/TABLE → actual text; IMAGE → linked file path (if any)
+  - RTF: kid-friendly color coding + legend
+  - ID 2021–2025 (macOS/Windows)
+*/
+
+(function () {
+  // ===== Settings (edit here) =====
+  var INCLUDE_MASTER_ITEMS   = false;   // set true to include master items
+  var INCLUDE_TABLES         = true;    // include tables (as TEXT blocks)
+  var ACCEPT_GROUPS          = true;    // read labels on groups
+  var ACCEPT_GRAPHIC_FRAMES  = true;    // read labels on rect/oval/polygon as IMAGE
+  var COLLAPSE_MULTISPACES   = false;   // true: compress multiple spaces in text
+  var TRIM_TEXT              = true;    // true: trim leading/trailing whitespace
+  var MAX_SNIPPET_LEN        = 0;       // 0=full text; else limit characters per tag block
+  var FALLBACK_IMAGE_NOTE    = "No linked image found — paste full path here";
+  var RTF_TITLE              = "INWIZ — Master Word (UltraDetect Clean + Live Content)";
+  var RTF_KID_TIPS           = [
+    "Type only between the two bracket lines.",
+    "For images, keep or replace with FULL file path.",
+    "Do not delete the bracket lines.",
+    "Colored cues: BLUE=Tag name, GREEN=Kind, ORANGE=Page, GRAY=sample lines."
+  ];
+
+  // ===== Input =====
+  var files = pickManyINDD();
+  if (!files) {
+    var folder = Folder.selectDialog("Pick a folder with .indd/.indt (Cancel = use OPEN docs)");
+    if (folder) files = listINDDInFolder(folder, false);
+    else if (hasDocs()) files = "__OPEN__";
+    else { alert("No files chosen and no documents open."); return; }
+  }
+
+  // ===== Output =====
+  var outFile = File.saveDialog("Save MASTER Word file (.doc / .rtf)", "*.doc");
+  if (!outFile) return;
+  if (!/\.(doc|rtf)$/i.test(outFile.name)) outFile = new File(outFile.fsName + ".doc");
+
+  // ===== Collect =====
+  var rows = []; // {docName, docSlug, pageAbs, pageUI, y1, x1, tag, kind, content}
+  var opened = [];
+
+  if (files === "__OPEN__") {
+    for (var d=0; d<app.documents.length; d++) try { harvestDoc(app.documents[d], rows); } catch(_){}
+  } else {
+    for (var i=0; i<files.length; i++){
+      var f = files[i]; if (!(f instanceof File)) continue;
+      var docOpened=null;
+      try{ docOpened = app.open(f, false); opened.push(docOpened); harvestDoc(docOpened, rows); }catch(_){}
+    }
+    for (var c=0; c<opened.length; c++) try{ opened[c].close(SaveOptions.NO);}catch(_){}
+  }
+
+  if (!rows.length){ alert("No labeled items detected (TEXT/TABLE/GROUP/GRAPHIC)."); return; }
+
+  // ===== Order: doc -> page -> top -> left -> tag =====
+  rows.sort(function(a,b){
+    if (a.docSlug!==b.docSlug) return (a.docSlug<b.docSlug?-1:1);
+    if (a.pageAbs!==b.pageAbs) return a.pageAbs-b.pageAbs;
+    if (a.y1!==b.y1) return a.y1-b.y1;         // top to bottom
+    if (a.x1!==b.x1) return a.x1-b.x1;         // left to right
+    return (a.tag<b.tag?-1:1);
+  });
+
+  // ===== Build kid-friendly RTF =====
+  // Color table: 0=auto,1=black,2=blue,3=green,4=orange,5=gray
+  var r=[];
+  r.push("{\\rtf1\\ansi\\deff0");
+  r.push("{\\fonttbl{\\f0 Arial;}{\\f1 Courier New;}}");
+  r.push("{\\colortbl;\\red0\\green0\\blue0;\\red0\\green112\\blue192;\\red0\\green153\\blue0;\\red255\\green128\\blue0;\\red128\\green128\\blue128;}");
+  r.push("\\fs32\\b " + enc(RTF_TITLE) + "\\b0\\fs20\\par");
+  r.push("Generated: " + enc(ts()) + "\\par\\par");
+
+  r.push("\\fs22\\b How to fill (Easy as 1-2-3)\\b0\\fs20\\par");
+  for (var iTip=0;iTip<RTF_KID_TIPS.length;iTip++) {
+    r.push("\\bullet " + enc(RTF_KID_TIPS[iTip]) + "\\par");
+  }
+  r.push("\\par");
+  r.push("{\\i Legend: } {\\cf2 TAG}{\\cf1  • }{\\cf3 KIND}{\\cf1  • }{\\cf4 PAGE}{\\cf1  • }{\\cf5 sample}\\par\\par");
+
+  var byDoc = groupBy(rows, function(x){ return x.docSlug; });
+  var docSlugs = keysOf(byDoc);
+
+  for (var d2=0; d2<docSlugs.length; d2++){
+    var slug = docSlugs[d2], setDoc = byDoc[slug], docName = setDoc[0].docName;
+    r.push("\\fs26\\b " + enc(docName) + "\\b0\\fs20\\par\\par");
+
+    var byPage = groupBy(setDoc, function(x){ return x.pageAbs+"|"+x.pageUI; });
+    var pageKeys = sortPageKeys(keysOf(byPage));
+
+    for (var p=0; p<pageKeys.length; p++){
+      var key = pageKeys[p], arr = byPage[key], ui = arr[0].pageUI, abs = arr[0].pageAbs;
+      r.push("\\fs22\\b Page \\cf4 " + enc(ui) + " \\cf1 (P" + pad(abs,3) + ")\\cf1\\b0\\fs20\\par");
+
+      for (var i2=0; i2<arr.length; i2++){
+        var it = arr[i2];
+        // Header line: [TAG]  KIND  Page: UI
+        r.push("\\f1\\cf2[" + enc(it.tag) + "]\\cf1\\f0   \\cf3" + enc(it.kind) + "\\cf1   Page: \\cf4" + enc(ui) + "\\cf1\\par");
+
+        // Content line(s)
+        var body = it.content || "";
+        if (MAX_SNIPPET_LEN > 0 && body && body.length > MAX_SNIPPET_LEN) {
+          body = body.slice(0, MAX_SNIPPET_LEN) + "…";
+        }
+        if (!body) {
+          body = (it.kind === "IMAGE") ? FALLBACK_IMAGE_NOTE : "type here...";
+        }
+
+        // draw content in normal body font; show a faint sample mark if we inserted a fallback note
+        var isFallback = (body === FALLBACK_IMAGE_NOTE || body === "type here...");
+        r.push((isFallback? "\\cf5" : "") + enc(body) + (isFallback? "\\cf1" : "") + "\\par");
+
+        // Footer bracket
+        r.push("\\f1\\cf2[/" + enc(it.tag) + "]\\cf1\\f0\\par\\par");
+      }
+      r.push("\\par");
+    }
+    if (d2 < docSlugs.length-1) r.push("\\page ");
+  }
+  r.push("}");
+
+  try { writeText(outFile, r.join("")); alert("Done. Exported "+rows.length+" tags with live content."); }
+  catch(e){ alert("Write failed: "+e.message); }
+
+  // ========= Harvest =========
+  function harvestDoc(doc, sink){
+    var docName = safeDocName(doc), slug = slugify(docName);
+
+    // normal pages
+    for (var p=0; p<doc.pages.length; p++){
+      var pg = doc.pages[p]; if (!isValid(pg)) continue;
+      collectFromPageLike(pg, docName, slug, p+1, pUI(pg), sink);
+    }
+
+    // master pages (optional)
+    if (!INCLUDE_MASTER_ITEMS) return;
+    if (!doc.masterSpreads || !doc.masterSpreads.length) return;
+    for (var ms=0; ms<doc.masterSpreads.length; ms++){
+      var msp = doc.masterSpreads[ms]; if (!isValid(msp)) continue;
+      for (var mp=0; mp<msp.pages.length; mp++){
+        var mpg = msp.pages[mp]; if (!isValid(mpg)) continue;
+        collectFromPageLike(mpg, docName, slug, 0, "MASTER-"+pUI(mpg), sink);
+      }
+    }
+  }
+
+  function collectFromPageLike(pageObj, docName, slug, pageAbs, pageUI, sink){
+    var items=[]; try{ items = pageObj.allPageItems; }catch(_){ items=[]; }
+    for (var i=0;i<items.length;i++){
+      var it = items[i]; if (!isValid(it)) continue;
+
+      var type = iType(it);
+      var label = getLabel(it);
+      var tag   = pickTag(label);  // may return null
+      if (!tag) continue;
+
+      // Direct TextFrame
+      if (type==="TextFrame"){
+        var text = textFromTextFrame(it);
+        pushRow(it, "TEXT", tag, text);
+        continue;
+      }
+
+      // Table (as TEXT)
+      if (INCLUDE_TABLES && type==="Table"){
+        var txt = textFromTable(it);
+        pushRow(it, "TEXT", tag, txt);
+        continue;
+      }
+
+      // Group with label
+      if (ACCEPT_GROUPS && type==="Group"){
+        var kind = groupKind(it);
+        if (kind === "TEXT") {
+          pushRow(it, "TEXT", tag, textFromGroup(it));
+        } else if (kind === "IMAGE") {
+          pushRow(it, "IMAGE", tag, imagePathFromGroup(it));
+        } else {
+          // fall back: safer to TEXT
+          pushRow(it, "TEXT", tag, textFromGroup(it));
+        }
+        continue;
+      }
+
+      // Graphic frames with label
+      if (ACCEPT_GRAPHIC_FRAMES && (type==="Rectangle" || type==="Oval" || type==="Polygon")){
+        pushRow(it, "IMAGE", tag, imagePathFromFrame(it));
+        continue;
+      }
+    }
+
+    function pushRow(obj, kind, tag, content){
+      var b = bounds(obj);
+      sink.push({
+        docName: docName,
+        docSlug: slug,
+        pageAbs : pageAbs,
+        pageUI  : pageUI,
+        y1      : b[0],
+        x1      : b[1],
+        tag     : tag,
+        kind    : kind,
+        content : normText(content, kind)
+      });
+    }
+  }
+
+  // Decide if labeled group is TEXT or IMAGE by its descendants
+  function groupKind(gr){
+    try{
+      // any descendant TextFrame?
+      if (gr.textFrames && gr.textFrames.length) return "TEXT";
+      if (INCLUDE_TABLES){
+        try{
+          for (var i=0;i<gr.textFrames.length;i++){
+            var tfs = gr.textFrames[i].tables;
+            if (tfs && tfs.length) return "TEXT";
+          }
+        }catch(_){}
+      }
+      // graphic descendants?
+      if (hasGraphicDesc(gr)) return "IMAGE";
+    }catch(_){}
+    return "TEXT";
+  }
+
+  function hasGraphicDesc(gr){
+    try{
+      if ((gr.allGraphics && gr.allGraphics.length) || (gr.rectangles && gr.rectangles.length) || (gr.ovals && gr.ovals.length) || (gr.polygons && gr.polygons.length)) return true;
+    }catch(_){}
+    return false;
+  }
+
+  // ========= Content extractors =========
+  function textFromTextFrame(tf){
+    try{
+      var s = tf.parentStory ? tf.parentStory.contents : tf.contents;
+      return s || "";
+    }catch(_){ return ""; }
+  }
+
+  function textFromTable(tbl){
+    // Export as plain text grid (tab-separated rows)
+    try{
+      var out=[], r, c, rows=tbl.rows.length, cols=tbl.columns.length;
+      for (r=0; r<rows; r++){
+        var row=[], cell;
+        for (c=0; c<cols; c++){
+          try{
+            cell = tbl.rows[r].cells[c];
+            row.push(cell ? String(cell.contents||"") : "");
+          }catch(__){ row.push(""); }
+        }
+        out.push(row.join("\t"));
+      }
+      return out.join("\r");
+    }catch(_){ return ""; }
+  }
+
+  function textFromGroup(gr){
+    // Concatenate stories of all textFrames in reading order (top->left)
+    try{
+      var arr=[], i;
+      for (i=0;i<gr.textFrames.length;i++){
+        var tf = gr.textFrames[i];
+        arr.push({ y: bounds(tf)[0], x: bounds(tf)[1], t: textFromTextFrame(tf) });
+      }
+      arr.sort(function(a,b){ if (a.y!==b.y) return a.y-b.y; return a.x-b.x; });
+      var s=[], last="";
+      for (i=0;i<arr.length;i++){
+        var t = arr[i].t||"";
+        if (t && t!==last) s.push(t);
+        last = t;
+      }
+      return s.join("\r");
+    }catch(_){ return ""; }
+  }
+
+  function imagePathFromFrame(fr){
+    // find first linked graphic inside this frame
+    try{
+      var g = (fr.allGraphics && fr.allGraphics.length) ? fr.allGraphics[0] : null;
+      if (g){
+        try{ if (g.itemLink && g.itemLink.filePath) return String(g.itemLink.filePath); }catch(_){}
+        try{ if (g.itemLink && g.itemLink.name) return String(g.itemLink.name); }catch(_){}
+      }
+    }catch(_){}
+    return FALLBACK_IMAGE_NOTE;
+  }
+
+  function imagePathFromGroup(gr){
+    try{
+      // prefer any graphic in the group
+      if (gr.allGraphics && gr.allGraphics.length){
+        var g = gr.allGraphics[0];
+        try{ if (g.itemLink && g.itemLink.filePath) return String(g.itemLink.filePath); }catch(_){}
+        try{ if (g.itemLink && g.itemLink.name) return String(g.itemLink.name); }catch(_){}
+      }
+      // else check any graphic frame within
+      if (gr.rectangles && gr.rectangles.length) return imagePathFromFrame(gr.rectangles[0]);
+      if (gr.ovals && gr.ovals.length)       return imagePathFromFrame(gr.ovals[0]);
+      if (gr.polygons && gr.polygons.length)  return imagePathFromFrame(gr.polygons[0]);
+    }catch(_){}
+    return FALLBACK_IMAGE_NOTE;
+  }
+
+  // ========= Helpers =========
+  function normText(s, kind){
+    if (s == null) s = "";
+    s = String(s);
+    if (TRIM_TEXT) s = s.replace(/^\s+|\s+$/g,"");
+    if (COLLAPSE_MULTISPACES) s = s.replace(/[ \t]{2,}/g," ");
+    // never inject RTF control words
+    return s;
+  }
+
+  function hasDocs(){ try { return app.documents.length>0; } catch(_){ return false; } }
+  function pickManyINDD(){
+    try{
+      var filt=function(f){ return (f instanceof Folder) || /\.(indd|indt)$/i.test(f.name); };
+      var res=File.openDialog("Select .indd/.indt (multi-select OK)",filt,true);
+      if (!res || !res.length) return null;
+      var arr=[]; for (var i=0;i<res.length;i++) if (res[i] instanceof File) arr.push(res[i]);
+      return arr.length?arr:null;
+    }catch(_){ return null; }
+  }
+  function listINDDInFolder(folder, recurse){
+    var out=[], list=folder.getFiles();
+    for (var i=0;i<list.length;i++){
+      var it=list[i];
+      if (it instanceof File && /\.(indd|indt)$/i.test(it.name)) out.push(it);
+      else if (recurse && it instanceof Folder) out = out.concat(listINDDInFolder(it, true));
+    }
+    return out;
+  }
+
+  function isValid(o){ try { return o && o.isValid===true; } catch(_){ return false; } }
+  function iType(o){
+    try{ if (o.reflect && o.reflect.name) return String(o.reflect.name); }catch(_){}
+    try{ return String(o.constructor.name||"PageItem"); }catch(_){ return "PageItem"; }
+  }
+  function getLabel(o){ try{ return String(o.label||""); }catch(_){ return ""; } }
+  function bounds(o){
+    try{
+      var b = o.visibleBounds || o.geometricBounds;
+      if (b && b.length===4) return b;
+    }catch(_){}
+    return [0,0,0,0];
+  }
+  function pUI(p){ try { return String(p.name); } catch(_){ return "Unknown"; } }
+  function safeDocName(d){ try { return d.name; } catch(_){ return "(document)"; } }
+  function slugify(nm){ return String(nm).replace(/\.[^.]+$/,"").replace(/[^A-Za-z0-9_]/g,"_").slice(0,64) || "DOC"; }
+
+  // Tag rule: TAG=Name wins; else sanitize label (keeps IDs like P025-Contact-2-0001)
+  function pickTag(label){
+    if (!label) return null;
+    var m = /(?:^|[|;])(?:TAG|WordTag|WTag)\s*=\s*([A-Za-z0-9_\-]+)/i.exec(label);
+    if (m && m[1]) return m[1];
+    var s = String(label);
+    s = s.replace(/\s+/g," ").replace(/^\s+|\s+$/g,"");
+    s = s.replace(/[^A-Za-z0-9_\-]+/g, "_").replace(/^_+|_+$/g,"").replace(/_{2,}/g,"_");
+    return s ? s.slice(0,64) : null;
+  }
+
+  // ----- RTF writers -----
+  function writeText(f, txt){ 
+    f.encoding="UTF-8"; 
+    f.lineFeed="Windows"; 
+    if (f.exists) f.remove(); 
+    if (!f.parent.exists) f.parent.create(); 
+    f.open("w"); f.write(txt); f.close(); 
+  }
+  function enc(s){
+    s = String(s);
+    var out=[], ch, code;
+    for (var i=0;i<s.length;i++){
+      ch=s.charAt(i); code=s.charCodeAt(i);
+      if (ch==="\\") out.push("\\\\");
+      else if (ch==="{") out.push("\\{");
+      else if (ch==="}") out.push("\\}");
+      else if (code>127) out.push("\\u"+(code>32767?code-65536:code)+"?");
+      else if (ch==="\r"||ch==="\n") out.push("\\line ");
+      else out.push(ch);
+    }
+    return out.join("");
+  }
+  function ts(){ var d=new Date(); function t(n){return (n<10?"0":"")+n;} return d.getFullYear()+"-"+t(d.getMonth()+1)+"-"+t(d.getDate())+" "+t(d.getHours())+":"+t(d.getMinutes()); }
+  function pad(n,w){ var s=String(n); while(s.length<w) s="0"+s; return s; }
+  function groupBy(arr,fn){ var m={}; for (var i=0;i<arr.length;i++){ var k=fn(arr[i]); (m[k]||(m[k]=[])).push(arr[i]); } return m; }
+  function keysOf(o){ var a=[]; for (var k in o) if (o.hasOwnProperty(k)) a.push(k); a.sort(); return a; }
+  function sortPageKeys(keys){
+    return keys.sort(function(A,B){
+      var a=parseInt(A.split("|")[0],10), b=parseInt(B.split("|")[0],10);
+      if (a!==b) return a-b; return (A<B?-1:1);
+    });
+  }
+})();
