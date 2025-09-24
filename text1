@@ -1,0 +1,121 @@
+#target "indesign"
+/*
+  ClearTextKeepLabels_SAFE.jsx
+  InDesign 2020–2025 (Win/Mac)
+  Purpose: Remove text from Text Frames while keeping frames & .label fields intact.
+  Scope: If user has a selection -> only selected (and any nested) TextFrames.
+         If nothing selected -> all TextFrames in the document.
+  Options: tweak the booleans below.
+*/
+
+(function () {
+  if (app.documents.length === 0) { alert("Open a document first."); return; }
+  var doc = app.activeDocument;
+
+  // ====== OPTIONS ======
+  var SKIP_LOCKED_ITEMS   = true;   // skip locked page items
+  var SKIP_LOCKED_LAYERS  = true;   // skip items on locked layers
+  var SKIP_HIDDEN_LAYERS  = true;   // skip items on hidden layers
+  var INCLUDE_MASTER_ITEMS= false;  // include master items if true
+
+  // ====== HELPERS ======
+  function isTextFrame(it){ try { return it && it.constructor && it.constructor.name === "TextFrame"; } catch(e){ return false; } }
+  function className(o){ try { return (o && o.constructor && o.constructor.name) || ""; } catch(e){ return ""; } }
+  function isOnMaster(tf){
+    // Master items live on a Spread whose parent is a MasterSpread.
+    try {
+      var p = tf.parent;               // Spread
+      var gp = p && p.parent;          // Document or MasterSpread
+      return (className(p) === "Spread" && className(gp) === "MasterSpread");
+    } catch(e){ return false; }
+  }
+  function isLocked(tf){
+    try {
+      if (tf.locked) return true;
+      if (SKIP_LOCKED_LAYERS && tf.itemLayer && tf.itemLayer.locked) return true;
+      return false;
+    } catch(e){ return true; }
+  }
+  function isHiddenByLayer(tf){
+    try { return SKIP_HIDDEN_LAYERS && tf.itemLayer && !tf.itemLayer.visible; }
+    catch(e){ return false; }
+  }
+
+  function collectFromSelection(){
+    var out = [], sel = app.selection || [];
+    for (var i=0; i<sel.length; i++){
+      var it = sel[i];
+      if (isTextFrame(it)) out.push(it);
+      // dive into containers (groups, pages, etc.)
+      try {
+        if (it.textFrames && it.textFrames.length){
+          for (var j=0; j<it.textFrames.length; j++) out.push(it.textFrames[j]);
+        }
+      } catch(_){}
+    }
+    return out;
+  }
+
+  function collectAll(){
+    // fastest and safest: get all text frames directly
+    var list;
+    try {
+      list = doc.textFrames.everyItem().getElements(); // returns an array of TextFrames
+    } catch(e){
+      // fallback: scan all page items (slower)
+      list = [];
+      var all = doc.allPageItems;
+      for (var i=0; i<all.length; i++) if (isTextFrame(all[i])) list.push(all[i]);
+    }
+    return list;
+  }
+
+  // ====== BUILD LIST ======
+  var frames = (app.selection && app.selection.length) ? collectFromSelection() : collectAll();
+
+  // de-dup (some objects can be reached twice through selection + children)
+  var seen = {}, work = [];
+  for (var k=0; k<frames.length; k++){
+    var tf = frames[k];
+    if (!tf || !tf.isValid) continue;
+    var id = tf.toSpecifier ? tf.toSpecifier() : (tf.id || ("@"+k));
+    if (seen[id]) continue; seen[id] = true;
+
+    if (!INCLUDE_MASTER_ITEMS && isOnMaster(tf)) continue;
+    if (SKIP_LOCKED_ITEMS && isLocked(tf)) continue;
+    if (isHiddenByLayer(tf)) continue;
+
+    work.push(tf);
+  }
+
+  if (!work.length){ alert("No eligible Text Frames found with current options."); return; }
+
+  // ====== CLEAR TEXT (keep labels) ======
+  function doClear(){
+    var cleared = 0;
+    for (var i=0; i<work.length; i++){
+      var tf = work[i]; if (!tf.isValid) continue;
+      try {
+        var keep = "";
+        try { keep = tf.label || ""; } catch(_){}
+        if (tf.texts && tf.texts.length){
+          // This clears visible + overset text of *this frame* only (not the entire story chain)
+          tf.texts[0].contents = "";
+          // defensive: restore label even though it shouldn’t change
+          try { tf.label = keep; } catch(_){}
+          cleared++;
+        }
+      } catch(_){}
+    }
+    return cleared;
+  }
+
+  // Use a single undo step when available; otherwise just run.
+  try {
+    app.doScript(doClear, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, "Clear Text (Keep Labels)");
+  } catch(e){
+    doClear(); // fallback if host constants aren’t available in this context
+  }
+
+  alert("Done. Cleared text in " + work.length + " frame(s). Labels, frames, and styles preserved.");
+})();
