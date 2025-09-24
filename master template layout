@@ -1,0 +1,88 @@
+/**
+ * Create_INWIZ_Master_12p.jsx
+ * -----------------------------------------------------------
+ * Builds a fresh A4 document with 12 pages, A/B masters,
+ * margins/columns/bleed, and tagged placeholders (Script Labels)
+ * for INWIZ-style automation.
+ */
+
+(function () {
+  var PAGE_COUNT = 12;
+  var A4 = { w: 595.2756, h: 841.8898 }; // A4 in points
+  var MARGINS = { top: 56.7, left: 56.7, bottom: 56.7, right: 56.7 };
+  var BLEED = 8.5; // 3mm approx
+  var COLUMNS = 2;
+  var GUTTER = 14.17;
+
+  var PLAN = {
+    P001: ["HEADING","SUB_HEADING","ADDRESS","CONTACT","BUILDING_AREA_TEXT","LIC_NO"],
+    P002: ["HEADING","BODY","POINTER","PROPERTY_NAME","STATS_TEXT","LIST"],
+    P003: ["SITE_PLAN:IMAGE","HEADING","BODY","TABLE1","TABLE2"],
+    P004: ["MAP_INGRESS:IMAGE","HEADING","BODY","LIST"],
+    P005: ["MAP_SUB_MARKET:IMAGE","HEADING","STATS_TEXT","POINTER","BODY"],
+    P006: ["MAP_AMENITIES:IMAGE","HEADING","BODY","LIST"],
+    P007: ["FLOORPLAN:IMAGE","HEADING","BODY","TABLE3"],
+    P008: ["MAP:IMAGE","HEADING","BODY","ABOUT_JLL","CONTACT"],
+    P009: ["HEADING","BODY","LIST"],
+    P010: ["HEADING","BODY"],
+    P011: ["FLOORPLAN:IMAGE","HEADING","PROPERTY_NAME"],
+    P012: ["HEADING","CONTACT","CONTACT_US","ABOUT_JLL"]
+  };
+
+  function z3(n){ return ("00"+(n+1)).slice(-3); }
+  function pageLabel(p){ return "P" + z3(p.documentOffset); }
+  function setLabel(obj, label){ try{ obj.label = label; }catch(e){} }
+
+  function addTextFrame(page, gb, text, label){
+    var tf = page.textFrames.add();
+    tf.geometricBounds = gb;
+    tf.contents = text;
+    setLabel(tf,label);
+    return tf;
+  }
+
+  function addImageRect(page, gb, label){
+    var r = page.rectangles.add();
+    r.geometricBounds = gb;
+    setLabel(r,label);
+    return r;
+  }
+
+  function bounds(page){
+    var m = page.marginPreferences;
+    var b = page.bounds;
+    return [m.top, m.left, b[2]-m.bottom, b[3]-m.right];
+  }
+
+  var doc = app.documents.add();
+  doc.documentPreferences.pageWidth = A4.w;
+  doc.documentPreferences.pageHeight = A4.h;
+  doc.documentPreferences.pagesPerDocument = PAGE_COUNT;
+  doc.documentPreferences.facingPages = true;
+  doc.documentPreferences.documentBleedTopOffset = BLEED;
+  doc.documentPreferences.documentBleedBottomOffset = BLEED;
+  doc.documentPreferences.documentBleedInsideOrLeftOffset = BLEED;
+  doc.documentPreferences.documentBleedOutsideOrRightOffset = BLEED;
+
+  for (var i=0; i<doc.pages.length; i++){
+    var p = doc.pages[i];
+    var pl = "P" + ("00"+(i+1)).slice(-3);
+    var slots = PLAN[pl] || ["HEADING","BODY"];
+    var gb = bounds(p);
+
+    for (var s=0; s<slots.length; s++){
+      var parts = slots[s].split(":");
+      var kind = parts[0];
+      var forceImage = (parts[1] && parts[1]==="IMAGE");
+      var tag = pl + "-" + kind + "-" + ("00"+(s+1)).slice(-3);
+
+      if (forceImage){
+        addImageRect(p, [gb[0]+s*40, gb[1], gb[0]+(s+1)*100, gb[3]], tag);
+      } else {
+        addTextFrame(p, [gb[0]+s*40, gb[1], gb[0]+(s+1)*60, gb[3]], kind+" placeholder", tag);
+      }
+    }
+  }
+
+  alert("INWIZ 12-page sample master created with tagged placeholders.");
+})();
