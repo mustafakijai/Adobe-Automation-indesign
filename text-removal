@@ -1,0 +1,142 @@
+/**  ClearTextKeepLabels.jsx
+ *  InDesign 2020–2025 (Win/Mac)
+ *  Purpose: Remove text contents from Text Frames while keeping frames & script labels intact.
+ *  - Choice: Selection only OR entire document
+ *  - Skips locked objects/layers & hidden layers by default
+ *  - Option to include Master page items (off by default)
+ *  - Works safely inside a single undo group
+ *  - Does NOT change .label on any item
+ *  Notes:
+ *    • Only affects TEXT in TextFrames. Frames remain, labels remain, geometry/styles remain.
+ *    • If frames are threaded, only the text currently *inside each frame* is cleared.
+ *    • Overset text attached to that frame is cleared as well (since it's part of that frame's text).
+ */
+
+(function () {
+  if (app.documents.length === 0) { alert("Open a document first."); return; }
+  var doc = app.activeDocument;
+
+  // ==== UI ====
+  var w = new Window("dialog", "Clear Text (Keep Script Labels)");
+  w.orientation = "column";
+  w.alignChildren = "left";
+
+  var grpScope = w.add("panel", undefined, "Scope");
+  grpScope.orientation = "column"; grpScope.alignChildren = "left";
+  var rbSel  = grpScope.add("radiobutton", undefined, "Selection only");
+  var rbAll  = grpScope.add("radiobutton", undefined, "Entire document");
+  rbSel.value = app.selection && app.selection.length > 0;
+  rbAll.value = !rbSel.value;
+
+  var grpOpts = w.add("panel", undefined, "Options");
+  grpOpts.orientation = "column"; grpOpts.alignChildren = "left";
+  var cbSkipLocked = grpOpts.add("checkbox", undefined, "Skip locked items and locked layers");
+  var cbSkipHidden = grpOpts.add("checkbox", undefined, "Skip hidden layers");
+  var cbIncludeMasters = grpOpts.add("checkbox", undefined, "Include Master page items");
+  cbSkipLocked.value = true;
+  cbSkipHidden.value = true;
+  cbIncludeMasters.value = false;
+
+  var grpBtns = w.add("group");
+  grpBtns.alignment = "right";
+  var btnOK = grpBtns.add("button", undefined, "Clear Text", {name:"ok"});
+  var btnCancel = grpBtns.add("button", undefined, "Cancel", {name:"cancel"});
+
+  if (w.show() !== 1) return;
+
+  // ==== Helpers ====
+  function isTextFrame(it) {
+    try { return it && it.constructor && it.constructor.name === "TextFrame"; }
+    catch (e) { return false; }
+  }
+  function onMaster(tf) {
+    try { return tf.parentPage === null && tf.parent instanceof Spread && tf.parent.parent && tf.parent.parent.constructor.name === "MasterSpread"; }
+    catch (e) { return false; }
+  }
+  function isOnHiddenLayer(tf) {
+    try { return !tf.itemLayer.visible || tf.itemLayer.locked; } catch (e) { return false; }
+  }
+  function isLocked(tf) {
+    try { return tf.locked || (tf.itemLayer && tf.itemLayer.locked); } catch (e) { return true; }
+  }
+
+  function collectTextFramesFromSelection() {
+    var out = [];
+    var sel = app.selection;
+    for (var i=0; i<sel.length; i++) {
+      var it = sel[i];
+      if (isTextFrame(it)) out.push(it);
+      else if (it.textFrames && it.textFrames.length) {
+        for (var j=0; j<it.textFrames.length; j++) out.push(it.textFrames[j]);
+      }
+    }
+    return out;
+  }
+
+  function collectAllTextFrames(doc) {
+    // Faster & safe across all spreads/pages (excludes masters unless opted)
+    var out = [];
+    var allFrames = doc.allPageItems; // includes everything; we’ll filter
+    for (var i=0; i<allFrames.length; i++) {
+      var it = allFrames[i];
+      if (!isTextFrame(it)) continue;
+      out.push(it);
+    }
+    return out;
+  }
+
+  // ==== Build work list ====
+  var frames = rbSel.value ? collectTextFramesFromSelection() : collectAllTextFrames(doc);
+
+  // Filter per options
+  var work = [];
+  for (var k=0; k<frames.length; k++) {
+    var tf = frames[k];
+    if (!tf.isValid) continue;
+
+    if (cbSkipHidden.value && isOnHiddenLayer(tf)) continue;
+    if (cbSkipLocked.value && isLocked(tf)) continue;
+
+    var masterItem = onMaster(tf);
+    if (masterItem && !cbIncludeMasters.value) continue;
+
+    work.push(tf);
+  }
+
+  if (work.length === 0) { alert("No eligible text frames found based on your options."); return; }
+
+  // ==== Clear text safely ====
+  app.doScript(function () {
+    // Single undo step
+    app.activeDocument.undoHistory = app.activeDocument.undoHistory; // no-op to keep ESTK calm
+    // Progress (simple)
+    var prog = null;
+    try { prog = app.createProgressBar("Clearing text...", work.length); } catch (_) {}
+
+    for (var i=0; i<work.length; i++) {
+      var tf = work[i];
+      if (!tf.isValid) continue;
+
+      try {
+        // Clear only the text present in this frame (including its overset tied to this frame).
+        // This keeps frame/label intact and does not delete the container.
+        if (tf.texts && tf.texts.length > 0) {
+          // Preserve the label explicitly (not necessary, but defensive in case of future edits)
+          var savedLabel = "";
+          try { savedLabel = tf.label; } catch(e){}
+          tf.texts[0].contents = ""; // <- the key line (empties visible + overset text of this frame)
+          // Restore label just in case any plugin fiddled with it (should not happen)
+          try { tf.label = savedLabel; } catch(e){}
+        }
+      } catch (e) {
+        // continue
+      }
+
+      if (prog) try { prog.increment(); } catch (_){}
+    }
+
+    if (prog) try { prog.close(); } catch (_){}
+  }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, "Clear Text (Keep Labels)");
+
+  alert("Done. Cleared text in " + work.length + " frame(s). Labels and frames preserved.");
+})();
