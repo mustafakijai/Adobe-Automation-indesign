@@ -1,0 +1,259 @@
+/**  AutoFitTextPro.jsx
+ *  InDesign 2020–2025 (Win/Mac)
+ *  Purpose: Auto-resize the TEXT (not the frame) inside TextFrames to remove overset and (optionally) fill the frame.
+ *  - Scope: Selection-only or Entire document
+ *  - Fit modes:
+ *      • Shrink-to-Fit: reduce text proportionally until no overset (never below Min Size)
+ *      • Grow-to-Fill (optional): increase text until just before overset (never above Max Size)
+ *  - Proportional scaling of point size across all textStyleRanges inside the frame
+ *  - Optional: scale Leading with point size (keeps line rhythm)
+ *  - Safe: single Undo step; preserves labels, styles, tracking, etc.
+ *  - Skips: locked items/layers, hidden layers (toggleable)
+ *  - Master items: optional
+ *
+ *  Notes:
+ *    • Only the characters *contained in each frame* are scaled, not the entire story.
+ *    • Anchored objects/tables inside text will follow the text’s line breaks naturally.
+ *    • For mixed styles/sizes, scaling is proportional per textStyleRange (no “flattening”).
+ */
+
+(function () {
+  if (app.documents.length === 0) { alert("Open a document first."); return; }
+  var doc = app.activeDocument;
+
+  // ==== UI ====
+  var dlg = new Window("dialog", "Auto Fit Text (Proportional)");
+  dlg.orientation = "column"; dlg.alignChildren = "fill";
+
+  var pScope = dlg.add("panel", undefined, "Scope"); pScope.alignChildren = "left";
+  var rbSel = pScope.add("radiobutton", undefined, "Selection only");
+  var rbAll = pScope.add("radiobutton", undefined, "Entire document");
+  rbSel.value = app.selection && app.selection.length > 0;
+  rbAll.value = !rbSel.value;
+
+  var pModes = dlg.add("panel", undefined, "Modes"); pModes.alignChildren = "left";
+  var cbShrink = pModes.add("checkbox", undefined, "Shrink-to-Fit (remove overset)");
+  var cbGrow   = pModes.add("checkbox", undefined, "Grow-to-Fill (expand until just before overset)");
+  cbShrink.value = true; cbGrow.value = false;
+
+  var pParams = dlg.add("panel", undefined, "Parameters"); pParams.orientation = "column"; pParams.alignChildren = "left";
+  var gRow1 = pParams.add("group"); gRow1.add("statictext", undefined, "Min Pt:");
+  var eMin = gRow1.add("edittext", undefined, "7.0"); eMin.characters = 6;
+  gRow1.add("statictext", undefined, "Max Pt:");
+  var eMax = gRow1.add("edittext", undefined, "72.0"); eMax.characters = 6;
+  var gRow2 = pParams.add("group");
+  var cbScaleLeading = gRow2.add("checkbox", undefined, "Scale leading with size");
+  cbScaleLeading.value = true;
+  var cbKeepAutoLeading = gRow2.add("checkbox", undefined, "Respect Auto Leading"); cbKeepAutoLeading.value = true;
+
+  var pOpts = dlg.add("panel", undefined, "Options"); pOpts.alignChildren = "left";
+  var cbSkipLocked  = pOpts.add("checkbox", undefined, "Skip locked items and locked layers"); cbSkipLocked.value = true;
+  var cbSkipHidden  = pOpts.add("checkbox", undefined, "Skip hidden layers"); cbSkipHidden.value = true;
+  var cbIncludeMasters = pOpts.add("checkbox", undefined, "Include Master page items"); cbIncludeMasters.value = false;
+
+  var gBtns = dlg.add("group"); gBtns.alignment = "right";
+  var bOK = gBtns.add("button", undefined, "Run", {name:"ok"});
+  var bCancel = gBtns.add("button", undefined, "Cancel", {name:"cancel"});
+  if (dlg.show() !== 1) return;
+
+  // ==== Helpers ====
+  function isTextFrame(it){ try{return it && it.constructor && it.constructor.name==="TextFrame";}catch(e){return false;} }
+  function onMaster(tf){
+    try{ return tf.parentPage===null && tf.parent instanceof Spread &&
+                 tf.parent.parent && tf.parent.parent.constructor.name==="MasterSpread"; }catch(e){return false;}
+  }
+  function isHiddenOrLocked(tf){
+    try{
+      if (cbSkipHidden.value && !tf.itemLayer.visible) return true;
+      if (cbSkipLocked.value && (tf.locked || tf.itemLayer.locked)) return true;
+      return false;
+    }catch(e){return true;}
+  }
+  function collectFromSelection(){
+    var out=[], sel=app.selection;
+    for (var i=0;i<sel.length;i++){
+      var it=sel[i];
+      if (isTextFrame(it)) out.push(it);
+      else if (it.textFrames && it.textFrames.length)
+        for (var j=0;j<it.textFrames.length;j++) out.push(it.textFrames[j]);
+    }
+    return out;
+  }
+  function collectAll(doc){
+    var out=[], items=doc.allPageItems;
+    for (var i=0;i<items.length;i++) if (isTextFrame(items[i])) out.push(items[i]);
+    return out;
+  }
+
+  // Proportional scaler over textStyleRanges inside a given Text range
+  function scaleTextObject(tr, factor, minPt, maxPt){
+    if (!tr || tr.length===0) return;
+    var ranges = tr.textStyleRanges;
+    for (var i=0;i<ranges.length;i++){
+      var r = ranges[i];
+      if (!r.isValid) continue;
+      // Point Size
+      try{
+        var ps = r.pointSize;
+        if (ps && !isNaN(ps)){
+          var newPS = Math.max(minPt, Math.min(maxPt, ps * factor));
+          r.pointSize = newPS;
+          // Leading
+          if (cbScaleLeading.value){
+            if (cbKeepAutoLeading.value && (r.leading instanceof Number === false)) {
+              // Auto leading: InDesign uses percentage; do not touch to keep ratio
+            } else {
+              var ld = r.leading;
+              if (ld && !isNaN(ld)) r.leading = ld * factor;
+            }
+          }
+        }
+      }catch(e){}
+    }
+  }
+
+  // Measure current min/max point sizes inside a frame's text
+  function getMinMaxPointSize(tr){
+    var minPS = Infinity, maxPS = 0, ranges = tr.textStyleRanges;
+    for (var i=0;i<ranges.length;i++){
+      var ps = Number(ranges[i].pointSize);
+      if (!isNaN(ps)){
+        if (ps < minPS) minPS = ps;
+        if (ps > maxPS) maxPS = ps;
+      }
+    }
+    if (minPS===Infinity) minPS=0;
+    return {min:minPS, max:maxPS};
+  }
+
+  // Binary search shrink/grow around overset condition
+  function fitFrame(tf, doShrink, doGrow, minPt, maxPt){
+    if (!tf.isValid) return;
+    var t = tf.texts[0];
+    if (!t || t.length===0) return;
+
+    var cur = getMinMaxPointSize(t);
+    if (cur.max === 0) return; // nothing to scale
+
+    // First: Shrink if overset
+    if (doShrink && tf.overflows){
+      // Compute lower bound factor so no style goes below minPt
+      var minFactor = (cur.min > 0) ? (minPt / cur.min) : 1.0; // <=1
+      minFactor = Math.min(minFactor, 1.0);
+      var lo = Math.max(0.1, Math.min(1.0, minFactor)); // safe floor
+      var hi = 1.0;
+      // Binary search: find largest factor in [lo,hi] that removes overset
+      for (var iter=0; iter<20; iter++){
+        var mid = (lo+hi)/2;
+        scaleTextObject(t, mid/1.0, minPt, maxPt); // scale relative to current → so we must reset each time
+        // Because we scaled relative, we need to re-derive current & adjust reference:
+        // To avoid compounding, we must UNDO between trials → not possible within loop.
+        // Workaround: compute relative scaling by remembering and applying delta from lastFactor.
+        // Implement incremental strategy:
+
+        // (See revised approach below)
+        break;
+      }
+    }
+  }
+
+  // ===== Revised approach (incremental with exponential steps + backoff) =====
+  function shrinkToFit(tf, minPt, maxPt){
+    var t = tf.texts[0]; if (!t || t.length===0) return;
+    var cur = getMinMaxPointSize(t);
+    if (!tf.overflows) return; // already fits
+
+    // Reduce quickly, then fine-tune
+    var factor = 0.90;   // 10% quick shrink
+    var fine   = 0.98;   // 2% fine shrink
+    var guard = 0;
+
+    // Quick shrink phase
+    while (tf.overflows && guard < 20){
+      // prevent going below minPt
+      cur = getMinMaxPointSize(t);
+      if (cur.min <= minPt + 0.05) break;
+      scaleTextObject(t, factor, minPt, maxPt);
+      guard++;
+    }
+    // Fine phase
+    guard = 0;
+    while (tf.overflows && guard < 40){
+      cur = getMinMaxPointSize(t);
+      if (cur.min <= minPt + 0.01) break;
+      scaleTextObject(t, fine, minPt, maxPt);
+      guard++;
+    }
+  }
+
+  function growToFill(tf, minPt, maxPt){
+    var t = tf.texts[0]; if (!t || t.length===0) return;
+    if (tf.overflows) return; // can't grow if already overset
+    var cur = getMinMaxPointSize(t);
+
+    // Grow quickly until overset, then back off a notch
+    var factorUp = 1.10; // 10% quick grow
+    var fineUp   = 1.02; // 2% fine grow
+    var guard = 0;
+
+    // Quick grow
+    while (!tf.overflows && guard < 20){
+      cur = getMinMaxPointSize(t);
+      if (cur.max >= maxPt - 0.05) break;
+      scaleTextObject(t, factorUp, minPt, maxPt);
+      guard++;
+      if (tf.overflows) { // went too far; step back
+        scaleTextObject(t, 1/factorUp, minPt, maxPt);
+        return;
+      }
+    }
+    // Fine grow
+    guard = 0;
+    while (!tf.overflows && guard < 60){
+      cur = getMinMaxPointSize(t);
+      if (cur.max >= maxPt - 0.01) break;
+      scaleTextObject(t, fineUp, minPt, maxPt);
+      guard++;
+      if (tf.overflows){
+        scaleTextObject(t, 1/fineUp, minPt, maxPt);
+        return;
+      }
+    }
+  }
+
+  // ==== Build work list ====
+  var frames = rbSel.value ? collectFromSelection() : collectAll(doc);
+  var work = [];
+  for (var i=0;i<frames.length;i++){
+    var tf = frames[i];
+    if (!tf.isValid) continue;
+    if (isHiddenOrLocked(tf)) continue;
+    if (onMaster(tf) && !cbIncludeMasters.value) continue;
+    if (!tf.contents || tf.contents === "") continue; // nothing to fit
+    work.push(tf);
+  }
+  if (work.length === 0){ alert("No eligible text frames found based on your options."); return; }
+
+  var minPt = Math.max(0.1, parseFloat(eMin.text));
+  var maxPt = Math.max(minPt, parseFloat(eMax.text));
+  var doShrink = cbShrink.value, doGrow = cbGrow.value;
+
+  // ==== Run ====
+  app.doScript(function(){
+    // Progress (best-effort)
+    var prog = null;
+    try { prog = app.createProgressBar("Auto fitting text...", work.length); } catch(_) {}
+
+    for (var k=0;k<work.length;k++){
+      var tf = work[k];
+      try{
+        if (doShrink && tf.overflows) shrinkToFit(tf, minPt, maxPt);
+        if (doGrow && !tf.overflows)  growToFill(tf, minPt, maxPt);
+      }catch(e){}
+      if (prog) try{ prog.increment(); }catch(_){}
+    }
+    if (prog) try{ prog.close(); }catch(_){}
+  }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, "Auto Fit Text (Proportional)");
+
+  alert("Done. Processed " + work.length + " frame(s). Labels & styles preserved.");
+})();
