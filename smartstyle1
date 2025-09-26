@@ -1,0 +1,204 @@
+#target "indesign"
+/*
+  AutoApply WoodWing Smart Styles — ONECLICK SAFE (ASCII-only)
+  - Opens/toggles a Smart Styles Library (by path or by name)
+  - Finds two Smart Style assets by name:
+      * TEXT_ASSET: applied to text frames without tables
+      * TABLE_ASSET: applied to tables (or to text frames containing tables)
+  - Applies across the whole document (or selection-only if CFG.selectionOnly = true)
+  - Requires WoodWing Smart Styles plug-in
+
+  Author: ChatGPT for Mr Khan
+*/
+
+(function(){
+  if (typeof app === "undefined") { alert("Run from InDesign."); return; }
+  if (!app.documents.length) { alert("Open a document first."); return; }
+  var doc = app.activeDocument;
+
+  // ===== CONFIG (EDIT THESE) =====
+  var CFG = {
+    // EITHER give a full path to your .indl, OR leave null and use libraryName
+    libraryPath: null, // e.g. "/Users/you/SmartStyles/MyStyles.indl"  (Mac)
+                       // or "C:/Users/you/SmartStyles/MyStyles.indl"  (Win)
+    libraryName: "MyStyles.indl", // used if libraryPath is null
+    TEXT_ASSET_NAME:  "Text_Default", // exact asset name for text styling
+    TABLE_ASSET_NAME: "Table_Default", // exact asset name for table styling
+    selectionOnly: false,  // true = only apply to selected frames/tables
+    applyTablesViaFrame: true // true = apply table style to the parent text frame (affects all tables in it)
+  };
+  // ================================
+
+  // ---- helpers ----
+  function safe(fn){ try { return fn(); } catch(e){ return null; } }
+  function isTextFrame(it){ return it && it.constructor && it.constructor.name === "TextFrame"; }
+
+  // ---- find or open library ----
+  function getLibrary(){
+    // try by path
+    if (CFG.libraryPath){
+      try {
+        var f = new File(CFG.libraryPath);
+        if (f.exists){
+          var lib = app.open(f); // returns Library
+          return lib;
+        }
+      } catch(_){}
+    }
+    // try existing libs by name (panel title usually equals filename)
+    for (var i=0; i<app.libraries.length; i++){
+      try {
+        var L = app.libraries[i];
+        if (L && L.name && L.name.toString() === CFG.libraryName) return L;
+      } catch(_){}
+    }
+    // last resort: try to open by name if a pathless file can be resolved (not guaranteed)
+    try {
+      var f2 = new File(CFG.libraryName);
+      if (f2.exists) return app.open(f2);
+    } catch(_){}
+    return null;
+  }
+
+  // ---- ensure Smart Styles mode on the library ----
+  function ensureSmartStyles(lib){
+    try {
+      // Toggle property exposed by WoodWing: Library.smartStyles (Boolean)
+      // https://helpcenter.woodwing.com/.../Scripting-for-Smart-Styles
+      if (lib.smartStyles !== true) lib.smartStyles = true;
+    } catch(_){}
+  }
+
+  // ---- find asset by name ----
+  function getAssetByName(lib, name){
+    if (!lib || !name) return null;
+    var as = lib.assets;
+    for (var i=0; i<as.length; i++){
+      try {
+        var A = as[i];
+        if (A && A.name && A.name.toString() === name) return A;
+      } catch(_){}
+    }
+    return null;
+  }
+
+  // ---- apply Smart Style asset ----
+  function applyAssetToPageItems(asset, items){
+    if (!asset || !items || !items.length) return;
+    try {
+      // WoodWing API: asset.applySmartStyle(Selection | PageItem[])
+      // We pass a list of PageItems where possible.
+      asset.applySmartStyle(items);
+    } catch(e){
+      // Some Smart Styles require selection context (esp. for tables). Fallback:
+      try {
+        var oldSel = app.selection;
+        for (var i=0; i<items.length; i++){
+          try {
+            app.select(items[i]);
+            asset.applySmartStyle(app.selection);
+          } catch(_){}
+        }
+        app.selection = oldSel;
+      } catch(_){}
+    }
+  }
+
+  // ---- collect targets ----
+  function collectTargets(){
+    var textFrames = [];
+    var framesWithTables = [];
+    if (CFG.selectionOnly && app.selection && app.selection.length){
+      // from selection
+      for (var s=0; s<app.selection.length; s++){
+        var it = app.selection[s];
+        // normalize: table -> parent text frame; text -> its parent frame
+        try {
+          if (it.constructor && it.constructor.name === "Table"){
+            var tf = it.parentStory && it.parentStory.textContainers ? it.parentStory.textContainers[0] : null;
+            if (isTextFrame(tf)) framesWithTables.push(tf);
+            continue;
+          }
+        } catch(_){}
+        if (isTextFrame(it)){
+          // check tables inside
+          var hasTables = false;
+          try { hasTables = it.parentStory.tables.length > 0; } catch(_){}
+          if (hasTables) framesWithTables.push(it); else textFrames.push(it);
+        }
+      }
+      // dedupe by id
+      var seen = {}, outFrames = [], outWithTables = [];
+      for (var a=0; a<textFrames.length; a++){ var id = textFrames[a].id; if (!seen[id]){ seen[id]=1; outFrames.push(textFrames[a]); } }
+      for (var b=0; b<framesWithTables.length; b++){ var id2 = framesWithTables[b].id; if (!seen[id2]){ seen[id2]=1; outWithTables.push(framesWithTables[b]); } }
+      return { frames: outFrames, framesWithTables: outWithTables };
+    }
+
+    // whole document
+    for (var i=0; i<doc.stories.length; i++){
+      // each story may have multiple text containers; pick each frame
+      var conts = [];
+      try { conts = doc.stories[i].textContainers; } catch(_){}
+      for (var j=0; j<conts.length; j++){
+        var tf = conts[j];
+        if (!isTextFrame(tf)) continue;
+        var hasTables = false;
+        try { hasTables = tf.parentStory.tables.length > 0; } catch(_){}
+        if (hasTables) framesWithTables.push(tf); else textFrames.push(tf);
+      }
+    }
+    return { frames: textFrames, framesWithTables: framesWithTables };
+  }
+
+  // ---- main ----
+  try{
+    app.doScript(function(){
+      var lib = getLibrary();
+      if (!lib){ alert("Smart Styles Library not found. Check CFG.libraryPath or CFG.libraryName."); return; }
+      ensureSmartStyles(lib); // put library in Smart Styles mode
+
+      var textAsset  = getAssetByName(lib, CFG.TEXT_ASSET_NAME);
+      var tableAsset = getAssetByName(lib, CFG.TABLE_ASSET_NAME);
+      if (!textAsset && !tableAsset){
+        alert("Neither TEXT_ASSET_NAME nor TABLE_ASSET_NAME found in library.");
+        return;
+      }
+
+      var targets = collectTargets();
+      var textFrames  = targets.frames;
+      var framesWithT = targets.framesWithTables;
+
+      // 1) Apply TEXT asset to text-only frames
+      if (textAsset && textFrames.length){
+        applyAssetToPageItems(textAsset, textFrames);
+      }
+
+      // 2) Apply TABLE asset either to each table (via selection) or to whole frame containing tables
+      if (tableAsset && framesWithT.length){
+        if (CFG.applyTablesViaFrame){
+          // Apply to the frame: Smart Styles will style all tables in that frame
+          applyAssetToPageItems(tableAsset, framesWithT);
+        } else {
+          // Apply to each table via selection
+          var oldSel = app.selection;
+          for (var f=0; f<framesWithT.length; f++){
+            var story = framesWithT[f].parentStory;
+            var tabs = [];
+            try { tabs = story.tables.everyItem().getElements(); } catch(_){}
+            for (var t=0; t<tabs.length; t++){
+              try {
+                app.select(tabs[t]);
+                tableAsset.applySmartStyle(app.selection);
+              } catch(_){}
+            }
+          }
+          try { app.selection = oldSel; } catch(_){}
+        }
+      }
+
+      alert("Smart Styles applied.\nText frames: " + (textFrames? textFrames.length:0) + "\nFrames with tables: " + (framesWithT? framesWithT.length:0));
+    }, ScriptLanguage.JAVASCRIPT, undefined, UndoModes.ENTIRE_SCRIPT, "AutoApply WoodWing Smart Styles");
+  }catch(e){
+    alert("AutoApply failed: " + e.message);
+  }
+})();
