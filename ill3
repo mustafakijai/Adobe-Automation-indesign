@@ -1,0 +1,403 @@
+/**************************************************************
+ * MapLayer_AutoStyler_VIVID_JLL2025.jsx
+ * Author: ChatGPT for Mr Khan — 2025
+ * Adobe Illustrator 2019–2025 (ExtendScript)
+ *
+ * ZERO-CLICK: Styles ALL layers in the document using explicit
+ * rules for the JLL map stack shown in your screenshots.
+ * Bright, readable colors for quick visual identification.
+ **************************************************************/
+#target illustrator
+(function(){
+  if (app.documents.length===0){ alert("Open a document first."); return; }
+  var doc = app.activeDocument;
+
+  // ------------ SETTINGS ------------
+  var AUTO_UNLOCK = true;
+  var AUTO_SHOW_HIDDEN = true;
+
+  // ------------ COLORS ------------
+  function rgb(R,G,B){ var c=new RGBColor(); c.red=R; c.green=G; c.blue=B; return c; }
+  var C = {
+    white: rgb(255,255,255),
+    noir:  rgb(25,25,25),
+
+    // vivid lines
+    fwy:   rgb(255,0,152),   // freeway/motorway magenta
+    hwy:   rgb(255,106,0),   // highway orange
+    major: rgb(255,230,0),   // major yellow
+    minor: rgb(0,229,255),   // minor cyan
+    local: rgb(120,120,120), // local grey
+    tunnel:rgb(160,160,160),
+
+    waterL:rgb(0,168,255),
+    waterA:rgb(191,232,255),
+    bathy: rgb(160,205,245),
+
+    rail:  rgb(138,43,226),
+    ferry: rgb(0,200,180),
+    bndry: rgb(255,45,45),
+
+    parkA: rgb(67,255,100),
+    forest:rgb(0,200,83),
+    land:  rgb(245,242,235),
+
+    poi:   rgb(41,98,255),
+    medical: rgb(255,59,59),
+    education: rgb(123,97,255),
+    retail: rgb(255,127,0),
+    landmark: rgb(255,0,255),
+    emergency: rgb(255,23,68),
+    cemetery: rgb(126,140,141),
+    golf: rgb(46,204,113),
+    industry: rgb(255,179,0),
+    transport: rgb(41,98,255),
+    military: rgb(109,76,65)
+  };
+
+  // ------------ FONT FALLBACK ------------
+  var FALLBACK_FONTS=["SourceSansPro-Regular","ArialMT","Helvetica","MyriadPro-Regular"];
+  function findTextFont(family,style){
+    try{
+      var i,tf;
+      if (family||style){
+        for(i=0;i<app.textFonts.length;i++){tf=app.textFonts[i]; if((!family||tf.family===family)&&(!style||tf.style===style)) return tf;}
+        if (family){ for(i=0;i<app.textFonts.length;i++){tf=app.textFonts[i]; if(tf.family===family) return tf;} }
+      }
+      for(i=0;i<FALLBACK_FONTS.length;i++){ try{ return app.textFonts.getByName(FALLBACK_FONTS[i]); }catch(e){} }
+    }catch(e){}
+    return app.textFonts.length ? app.textFonts[0] : null;
+  }
+
+  // ------------ RULES ------------
+  // Each rule: {name, target: "text"|"path", layerPattern: /.../i, style:{...}}
+  var RULES = [
+    // ===== CITY / POI LABELS & HALOS =====
+    {name:"City labels XL", target:"text", layerPattern:/^City large scale\/x large$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Bold",fontSize:16,tracking:10,fillText:C.noir,halo:true,haloColor:C.white,haloWeight:3.0}},
+    {name:"City labels XL Halo", target:"text", layerPattern:/^City large scale\/x large Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Bold",fontSize:16,fillText:C.noir,halo:true,haloColor:C.white,haloWeight:4.0}},
+    {name:"City labels Medium", target:"text", layerPattern:/^City large scale\/medium$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:12.5,tracking:8,fillText:C.noir,halo:true,haloColor:C.white,haloWeight:2.4}},
+    {name:"City labels Medium Halo", target:"text", layerPattern:/^City large scale\/medium Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:12.5,fillText:C.noir,halo:true,haloColor:C.white,haloWeight:3.2}},
+
+    {name:"POI General", target:"text", layerPattern:/^Point of interest\/General$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.poi,halo:true,haloColor:C.white,haloWeight:1.6}},
+    {name:"POI General Halo", target:"text", layerPattern:/^Point of interest\/General Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.poi,halo:true,haloColor:C.white,haloWeight:2.2}},
+
+    // ===== CATEGORY LABELS (with halos) =====
+    // Admin0 forest or park label
+    {name:"Admin0 forest/park label", target:"text", layerPattern:/^Admin0 forest or park\/label\/Default$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.forest,halo:true,haloColor:C.white,haloWeight:1.6}},
+    {name:"Admin0 forest/park label Halo", target:"text", layerPattern:/^Admin0 forest or park\/label\/Default Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.forest,halo:true,haloColor:C.white,haloWeight:2.2}},
+
+    // Medical/Education/Retail/Landmark/Emergency/Cemetery/Golf/Industry/Transportation/Military labels
+    {name:"Medical label", target:"text", layerPattern:/^Medical\/label\/Default$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:9,fillText:C.medical,halo:true,haloColor:C.white,haloWeight:1.6}},
+    {name:"Medical label Halo", target:"text", layerPattern:/^Medical\/label\/Default Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:9,fillText:C.medical,halo:true,haloColor:C.white,haloWeight:2.2}},
+
+    {name:"Education label", target:"text", layerPattern:/^Education\/label\/Default$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:9,fillText:C.education,halo:true,haloColor:C.white,haloWeight:1.6}},
+    {name:"Education label Halo", target:"text", layerPattern:/^Education\/label\/Default Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:9,fillText:C.education,halo:true,haloColor:C.white,haloWeight:2.2}},
+
+    {name:"Retail label", target:"text", layerPattern:/^Retail\/label\/Default$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:9,fillText:C.retail,halo:true,haloColor:C.white,haloWeight:1.6}},
+    {name:"Retail label Halo", target:"text", layerPattern:/^Retail\/label\/Default Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:9,fillText:C.retail,halo:true,haloColor:C.white,haloWeight:2.2}},
+
+    {name:"Landmark label", target:"text", layerPattern:/^Landmark\/label\/Default$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:9,fillText:C.landmark,halo:true,haloColor:C.white,haloWeight:1.6}},
+    {name:"Landmark label Halo", target:"text", layerPattern:/^Landmark\/label\/Default Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:9,fillText:C.landmark,halo:true,haloColor:C.white,haloWeight:2.2}},
+
+    {name:"Emergency label", target:"text", layerPattern:/^Emergency\/label\/Default$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:9,fillText:C.emergency,halo:true,haloColor:C.white,haloWeight:1.6}},
+    {name:"Emergency label Halo", target:"text", layerPattern:/^Emergency\/label\/Default Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:9,fillText:C.emergency,halo:true,haloColor:C.white,haloWeight:2.2}},
+
+    {name:"Cemetery label", target:"text", layerPattern:/^Cemetery\/label\/Default$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.cemetery,halo:true,haloColor:C.white,haloWeight:1.6}},
+    {name:"Cemetery label Halo", target:"text", layerPattern:/^Cemetery\/label\/Default Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.cemetery,halo:true,haloColor:C.white,haloWeight:2.2}},
+
+    {name:"Golf label", target:"text", layerPattern:/^Golf course\/label\/Default$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.golf,halo:true,haloColor:C.white,haloWeight:1.6}},
+    {name:"Golf label Halo", target:"text", layerPattern:/^Golf course\/label\/Default Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.golf,halo:true,haloColor:C.white,haloWeight:2.2}},
+
+    {name:"Industry label", target:"text", layerPattern:/^Industry\/label\/Default$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.industry,halo:true,haloColor:C.white,haloWeight:1.6}},
+    {name:"Industry label Halo", target:"text", layerPattern:/^Industry\/label\/Default Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.industry,halo:true,haloColor:C.white,haloWeight:2.2}},
+
+    {name:"Transportation label", target:"text", layerPattern:/^Transportation\/label\/Default$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.transport,halo:true,haloColor:C.white,haloWeight:1.6}},
+    {name:"Transportation label Halo", target:"text", layerPattern:/^Transportation\/label\/Default Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.transport,halo:true,haloColor:C.white,haloWeight:2.2}},
+
+    {name:"Military label", target:"text", layerPattern:/^Military\/label\/Default$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.military,halo:true,haloColor:C.white,haloWeight:1.6}},
+    {name:"Military label Halo", target:"text", layerPattern:/^Military\/label\/Default Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.military,halo:true,haloColor:C.white,haloWeight:2.2}},
+
+    // Water label (if present)
+    {name:"Water line label", target:"text", layerPattern:/^Water line\/label\/Default$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.waterL,halo:true,haloColor:C.white,haloWeight:1.6}},
+    {name:"Water line label Halo", target:"text", layerPattern:/^Water line\/label\/Default Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.waterL,halo:true,haloColor:C.white,haloWeight:2.2}},
+
+    // ===== ROAD LABELS =====
+    {name:"Road label Highway", target:"text", layerPattern:/^Road\/label\/Highway$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:10,fillText:C.hwy,halo:true,haloColor:C.white,haloWeight:2.0}},
+    {name:"Road label Highway Halo", target:"text", layerPattern:/^Road\/label\/Highway Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:10,fillText:C.hwy,halo:true,haloColor:C.white,haloWeight:2.6}},
+    {name:"Road label Major", target:"text", layerPattern:/^Road\/label\/Major$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:9.5,fillText:C.major,halo:true,haloColor:C.white,haloWeight:1.8}},
+    {name:"Road label Major Halo", target:"text", layerPattern:/^Road\/label\/Major Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:9.5,fillText:C.major,halo:true,haloColor:C.white,haloWeight:2.2}},
+    {name:"Road label Major alt", target:"text", layerPattern:/^Road\/label\/Major, alt name$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9.5,fillText:C.major,halo:true,haloColor:C.white,haloWeight:1.8}},
+    {name:"Road label Major alt Halo", target:"text", layerPattern:/^Road\/label\/Major, alt name Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9.5,fillText:C.major,halo:true,haloColor:C.white,haloWeight:2.2}},
+    {name:"Road label Minor", target:"text", layerPattern:/^Road\/label\/Minor$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:8.8,fillText:C.minor,halo:true,haloColor:C.white,haloWeight:1.6}},
+    {name:"Road label Minor Halo", target:"text", layerPattern:/^Road\/label\/Minor Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:8.8,fillText:C.minor,halo:true,haloColor:C.white,haloWeight:2.0}},
+    {name:"Road label Local", target:"text", layerPattern:/^Road\/label\/Local$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:8.5,fillText:C.local,halo:true,haloColor:C.white,haloWeight:1.4}},
+    {name:"Road label Local Halo", target:"text", layerPattern:/^Road\/label\/Local Halo$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:8.5,fillText:C.local,halo:true,haloColor:C.white,haloWeight:1.8}},
+    // Shields/Rectangles/Secondary Hwy
+    {name:"Road label Shield blue white", target:"path", layerPattern:/^Road\/label\/Shield blue white$/i,
+      style:{fillColor:C.white, forceFill:true, strokeColor:C.hwy, strokeWeight:1.1}},
+    {name:"Road label Shield blue white Labels", target:"text", layerPattern:/^Road\/label\/Shield blue white Labels$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Bold",fontSize:9.5,fillText:C.hwy,halo:true,haloColor:C.white,haloWeight:2.2}},
+    {name:"Road label Shield blue white Points", target:"path", layerPattern:/^Road\/label\/Shield blue white Points$/i,
+      style:{fillColor:C.white, forceFill:true, strokeColor:C.hwy, strokeWeight:1.1}},
+    {name:"Road label Secondary Hwy white black", target:"text", layerPattern:/^Road\/label\/Secondary Hwy white black$/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:9.5,fillText:C.noir,halo:true,haloColor:C.white,haloWeight:2.0}},
+    {name:"Road label Rectangle white black", target:"path", layerPattern:/^Road\/label\/Rectangle white black$/i,
+      style:{fillColor:C.white,forceFill:true,strokeColor:C.noir,strokeWeight:1.0}},
+
+    // ===== WATER / BOUNDARY LINES =====
+    {name:"Water line", target:"path", layerPattern:/^Water line\/(Default|label)?/i,
+      style:{strokeColor:C.waterL, strokeWeight:0.9, strokeCap:StrokeCap.BUTTENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {name:"Water area Lake/river/bay", target:"path", layerPattern:/^Water area\/Lake, river or bay$/i,
+      style:{fillColor:C.waterA, forceFill:true, strokeColor:null}},
+    {name:"Marine area bathymetry 1", target:"path", layerPattern:/^Marine area\/bathymetry depth 1$/i,
+      style:{fillColor:C.bathy, forceFill:true, strokeColor:null}},
+    {name:"Stream or river", target:"path", layerPattern:/^Water line\/Stream or river$/i,
+      style:{strokeColor:C.waterL, strokeWeight:0.8, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+
+    {name:"Boundary Admin1/0", target:"path", layerPattern:/^Boundary line\/Admin1\/0$/i,
+      style:{strokeColor:C.bndry, strokeWeight:0.7, strokeDashes:[1.2,1.2], opacity:85}},
+    {name:"Boundary Admin1/1", target:"path", layerPattern:/^Boundary line\/Admin1\/1$/i,
+      style:{strokeColor:C.bndry, strokeWeight:0.7, strokeDashes:[2,1.5], opacity:85}},
+
+    // ===== ROADS (GEOMETRY) =====
+    // Freeway/Motorway tiers
+    {name:"Road Freeway/Motorway 0", target:"path", layerPattern:/^Road\/Freeway Motorway\/0$/i,
+      style:{strokeColor:C.fwy, strokeWeight:1.9, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {name:"Road Freeway/Motorway 1", target:"path", layerPattern:/^Road\/Freeway Motorway\/1$/i,
+      style:{strokeColor:C.fwy, strokeWeight:1.6, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {name:"Road Freeway/Motorway 2", target:"path", layerPattern:/^Road\/Freeway Motorway\/2$/i,
+      style:{strokeColor:C.fwy, strokeWeight:1.3, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    // Highway tiers
+    {name:"Road Highway 0", target:"path", layerPattern:/^Road\/Highway\/0$/i,
+      style:{strokeColor:C.hwy, strokeWeight:1.6, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {name:"Road Highway 1", target:"path", layerPattern:/^Road\/Highway\/1$/i,
+      style:{strokeColor:C.hwy, strokeWeight:1.3, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {name:"Road Highway 2", target:"path", layerPattern:/^Road\/Highway\/2$/i,
+      style:{strokeColor:C.hwy, strokeWeight:1.0, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    // Major tiers & ramps
+    {name:"Road Major 0", target:"path", layerPattern:/^Road\/Major\/0$/i,
+      style:{strokeColor:C.major, strokeWeight:1.2, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {name:"Road Major 1", target:"path", layerPattern:/^Road\/Major\/1$/i,
+      style:{strokeColor:C.major, strokeWeight:1.0, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {name:"Road Major ramp 0", target:"path", layerPattern:/^Road\/Major, ramp or traffic circle\/0$/i,
+      style:{strokeColor:C.major, strokeWeight:1.0, strokeDashes:[3,1.5], strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {name:"Road Major ramp 1", target:"path", layerPattern:/^Road\/Major, ramp or traffic circle\/1$/i,
+      style:{strokeColor:C.major, strokeWeight:0.9, strokeDashes:[3,1.5], strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    // Minor tiers & ramps
+    {name:"Road Minor 0", target:"path", layerPattern:/^Road\/Minor\/0$/i,
+      style:{strokeColor:C.minor, strokeWeight:0.9, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {name:"Road Minor 1", target:"path", layerPattern:/^Road\/Minor\/1$/i,
+      style:{strokeColor:C.minor, strokeWeight:0.8, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {name:"Road Minor ramp 0", target:"path", layerPattern:/^Road\/Minor, ramp or traffic circle\/0$/i,
+      style:{strokeColor:C.minor, strokeWeight:0.8, strokeDashes:[2.5,1.5], strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    // Local / Service
+    {name:"Road Local 1", target:"path", layerPattern:/^Road\/Local\/1$/i,
+      style:{strokeColor:C.local, strokeWeight:0.7, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN, opacity:85}},
+    {name:"Road Service 0", target:"path", layerPattern:/^Road\/Service\/0$/i,
+      style:{strokeColor:C.local, strokeWeight:0.7, strokeDashes:[2,1], strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+
+    // ===== TUNNELS =====
+    {name:"Tunnel Freeway/Motorway 1", target:"path", layerPattern:/^Road tunnel\/Freeway Motorway\/1$/i,
+      style:{strokeColor:C.tunnel, strokeWeight:1.4, strokeDashes:[3,1.3], opacity:65}},
+    {name:"Tunnel Highway 1", target:"path", layerPattern:/^Road tunnel\/Highway\/1$/i,
+      style:{strokeColor:C.tunnel, strokeWeight:1.2, strokeDashes:[3,1.3], opacity:65}},
+    {name:"Tunnel Major 0", target:"path", layerPattern:/^Road tunnel\/Major\/0$/i,
+      style:{strokeColor:C.tunnel, strokeWeight:1.0, strokeDashes:[2.6,1.2], opacity:60}},
+    {name:"Tunnel Major 1", target:"path", layerPattern:/^Road tunnel\/Major\/1$/i,
+      style:{strokeColor:C.tunnel, strokeWeight:0.9, strokeDashes:[2.6,1.2], opacity:60}},
+    {name:"Tunnel Major ramp 0", target:"path", layerPattern:/^Road tunnel\/Major, ramp or traffic circle\/0$/i,
+      style:{strokeColor:C.tunnel, strokeWeight:0.9, strokeDashes:[2.6,1.2], opacity:55}},
+    {name:"Tunnel Major ramp 1", target:"path", layerPattern:/^Road tunnel\/Major, ramp or traffic circle\/1$/i,
+      style:{strokeColor:C.tunnel, strokeWeight:0.9, strokeDashes:[2.6,1.2], opacity:55}},
+    {name:"Tunnel Minor 0", target:"path", layerPattern:/^Road tunnel\/Minor\/0$/i,
+      style:{strokeColor:C.tunnel, strokeWeight:0.8, strokeDashes:[2.2,1.2], opacity:55}},
+    {name:"Tunnel Minor 1", target:"path", layerPattern:/^Road tunnel\/Minor\/1$/i,
+      style:{strokeColor:C.tunnel, strokeWeight:0.8, strokeDashes:[2.2,1.2], opacity:55}},
+    {name:"Tunnel Minor ramp 0", target:"path", layerPattern:/^Road tunnel\/Minor, ramp or traffic circle\/0$/i,
+      style:{strokeColor:C.tunnel, strokeWeight:0.8, strokeDashes:[2.2,1.2], opacity:55}},
+    {name:"Tunnel Local 1", target:"path", layerPattern:/^Road tunnel\/Local\/1$/i,
+      style:{strokeColor:C.tunnel, strokeWeight:0.7, strokeDashes:[2,1.2], opacity:55}},
+
+    // ===== RAIL / FERRY =====
+    {name:"Railroad 0", target:"path", layerPattern:/^Railroad\/0$/i,
+      style:{strokeColor:C.rail, strokeWeight:0.9, strokeDashes:[2.2,2.2]}},
+    {name:"Railroad 1", target:"path", layerPattern:/^Railroad\/1$/i,
+      style:{strokeColor:C.rail, strokeWeight:0.9, strokeDashes:[2.2,2.2]}},
+    {name:"Railroad 2", target:"path", layerPattern:/^Railroad\/2$/i,
+      style:{strokeColor:C.rail, strokeWeight:0.9, strokeDashes:[2.2,2.2]}},
+    {name:"Ferry", target:"path", layerPattern:/^Ferry\/Ferry$/i,
+      style:{strokeColor:C.ferry, strokeWeight:1.0, strokeDashes:[3,2]}},
+
+    // ===== AREAS / LANDUSE =====
+    {name:"Park or farming (area)", target:"path", layerPattern:/^Park or farming$/i,
+      style:{fillColor:C.parkA, forceFill:true, strokeColor:null}},
+    {name:"Medical area", target:"path", layerPattern:/^Medical$/i,
+      style:{fillColor:C.medical, forceFill:true}},
+    {name:"Education area", target:"path", layerPattern:/^Education$/i,
+      style:{fillColor:C.education, forceFill:true}},
+    {name:"Landmark area", target:"path", layerPattern:/^Landmark$/i,
+      style:{fillColor:C.landmark, forceFill:true}},
+    {name:"Emergency area", target:"path", layerPattern:/^Emergency$/i,
+      style:{fillColor:C.emergency, forceFill:true}},
+    {name:"Cemetery area", target:"path", layerPattern:/^Cemetery$/i,
+      style:{fillColor:C.cemetery, forceFill:true}},
+    {name:"Retail area", target:"path", layerPattern:/^Retail$/i,
+      style:{fillColor:C.retail, forceFill:true}},
+    {name:"Golf course area", target:"path", layerPattern:/^Golf course$/i,
+      style:{fillColor:C.golf, forceFill:true}},
+    {name:"Industry area", target:"path", layerPattern:/^Industry$/i,
+      style:{fillColor:C.industry, forceFill:true}},
+    {name:"Transportation area", target:"path", layerPattern:/^Transportation$/i,
+      style:{fillColor:C.transport, forceFill:true}},
+    {name:"Military area", target:"path", layerPattern:/^Military$/i,
+      style:{fillColor:C.military, forceFill:true}},
+    {name:"Admin0 forest or park (area)", target:"path", layerPattern:/^Admin0 forest or park$/i,
+      style:{fillColor:C.forest, forceFill:true}},
+    {name:"Land/Not ice", target:"path", layerPattern:/^Land\/Not ice$/i,
+      style:{fillColor:C.land, forceFill:true, strokeColor:null}},
+
+    // ===== FALLBACKS =====
+    {name:"Any text (fallback)", target:"text", layerPattern:/.*/i,
+      style:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.noir,halo:true,haloColor:C.white,haloWeight:1.4}},
+    {name:"Any path (fallback)", target:"path", layerPattern:/.*/i,
+      style:{strokeColor:rgb(0,0,0), strokeWeight:0.5}}
+  ];
+
+  // ------------ PROGRESS ------------
+  function Progress(title,max){
+    var p=new Window('palette',title); p.alignChildren='fill';
+    p.pbar=p.add('progressbar',undefined,0,Math.max(1,max||1));
+    p.msg=p.add('statictext',undefined,'Starting…'); p.msg.characters=60; p.show();
+    p.step=function(txt){ this.pbar.value++; if(txt) this.msg.text=txt; p.update(); };
+    p.done=function(){ try{ this.close(); }catch(e){} };
+    return p;
+  }
+
+  // ------------ COLLECT ITEMS ------------
+  var items=[];
+  function visitContainer(c){
+    var i;
+    for(i=0;i<c.groupItems.length;i++) visitContainer(c.groupItems[i]);
+    for(i=0;i<c.pathItems.length;i++) items.push(c.pathItems[i]);
+    for(i=0;i<c.compoundPathItems.length;i++) items.push(c.compoundPathItems[i]);
+    for(i=0;i<c.textFrames.length;i++) items.push(c.textFrames[i]);
+  }
+  for (var L=0; L<doc.layers.length; L++){
+    var lay=doc.layers[L];
+    if (AUTO_UNLOCK && lay.locked) lay.locked=false;
+    if (AUTO_SHOW_HIDDEN && !lay.visible) lay.visible=true;
+    visitContainer(lay);
+    for (var s=0; s<lay.layers.length; s++){ // sublayers deep
+      var sub=lay.layers[s];
+      if (AUTO_UNLOCK && sub.locked) sub.locked=false;
+      if (AUTO_SHOW_HIDDEN && !sub.visible) sub.visible=true;
+      visitContainer(sub);
+    }
+  }
+
+  // ------------ STYLING HELPERS ------------
+  function matchRule(layerName, item){
+    var isText=(item.typename==="TextFrame");
+    var isPath=(item.typename==="PathItem"||item.typename==="CompoundPathItem");
+    for (var i=0;i<RULES.length;i++){
+      var r=RULES[i];
+      if (!r.layerPattern.test(layerName)) continue;
+      if (r.target==="text" && !isText) continue;
+      if (r.target==="path" && !isPath) continue;
+      return r;
+    }
+    return null;
+  }
+  function applyTextStyle(tf, style){
+    try{
+      var tr=tf.textRange, ca=tr.characterAttributes;
+      var f=findTextFont(style.fontFamily||(ca.textFont?ca.textFont.family:null),
+                         style.fontStyle||(ca.textFont?ca.textFont.style:null));
+      if (f) ca.textFont=f;
+      if (style.fontSize) ca.size=style.fontSize;
+      if (style.tracking!==undefined) ca.tracking=style.tracking;
+      if (style.fillText) ca.fillColor=style.fillText;
+      if (style.halo){ ca.strokeColor=style.haloColor||C.white; ca.strokeWeight=style.haloWeight||1.6; ca.strokeOverPrint=false; }
+    }catch(e){}
+  }
+  function applyPathStyle(item, style){
+    try{
+      if (item.typename==="CompoundPathItem"){ for (var i=0;i<item.pathItems.length;i++) applyPathStyle(item.pathItems[i],style); return; }
+      if (AUTO_UNLOCK && item.locked) item.locked=false;
+      if (AUTO_SHOW_HIDDEN && item.hidden) item.hidden=false;
+      if (style.forceFill && style.fillColor){ item.filled=true; item.fillColor=style.fillColor; }
+      if (style.fillColor && item.filled) item.fillColor=style.fillColor;
+      if (style.strokeColor===null){ item.stroked=false; }
+      else if (style.strokeColor){ item.stroked=true; item.strokeColor=style.strokeColor; }
+      if (style.strokeWeight!==undefined && item.stroked) item.strokeWidth=style.strokeWeight;
+      if (style.strokeCap && item.stroked) item.strokeCap=style.strokeCap;
+      if (style.strokeJoin && item.stroked) item.strokeJoin=style.strokeJoin;
+      if (style.strokeDashes && item.stroked) item.strokeDashes=style.strokeDashes;
+      if (style.opacity!==undefined) item.opacity=style.opacity;
+    }catch(e){}
+  }
+
+  // ------------ RUN ------------
+  var p=Progress("VIVID JLL 2025 — styling…", items.length);
+  var count={text:0,path:0,unmatched:0,rules:{}};
+
+  for (var n=0;n<items.length;n++){
+    var it=items[n];
+    try{
+      var layerName=(it.layer&&it.layer.name)?it.layer.name:((it.parent&&it.parent.name)?it.parent.name:"");
+      var r=matchRule(layerName,it);
+      if (!r){ count.unmatched++; p.step("…"); continue; }
+      if (it.typename==="TextFrame"){ applyTextStyle(it,r.style); count.text++; }
+      else { applyPathStyle(it,r.style); count.path++; }
+      count.rules[r.name]=(count.rules[r.name]||0)+1;
+      p.step(r.name);
+    }catch(e){ p.step("skip"); }
+  }
+  p.done();
+
+  var lines=[];
+  lines.push("DONE — "+items.length+" item(s) inspected.");
+  lines.push("Text styled: "+count.text+" | Paths styled: "+count.path+" | Unmatched/Skipped: "+count.unmatched);
+  lines.push("Rules hit:"); for (var k in count.rules) lines.push("  • "+k+" → "+count.rules[k]);
+  alert(lines.join("\n"));
+})();
