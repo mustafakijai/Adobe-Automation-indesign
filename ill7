@@ -1,0 +1,249 @@
+/**************************************************************
+ * Basemap_Master_AutoStyler_ULTRA.jsx
+ * Author: ChatGPT for Mr Khan — 2025
+ * Illustrator 2019–2025 (ExtendScript)
+ *
+ * What’s special:
+ *   • Locates the deepest "2025 JLL Light Basemap" node automatically.
+ *   • Styles by SUB-LAYER NAME (e.g., "Road/Highway/0"), not by item guess.
+ *   • Unlocks + reveals the whole ancestor chain before applying.
+ *   • Walks clip groups → groups → compound paths → paths → text.
+ *   • Vivid debug palette; visible fallback so changes are undeniable.
+ **************************************************************/
+#target illustrator
+(function(){
+  if (app.documents.length===0){ alert("Open a document first."); return; }
+  var doc = app.activeDocument;
+
+  // ---------- helpers ----------
+  function rgb(R,G,B){ var c=new RGBColor(); c.red=R; c.green=G; c.blue=B; return c; }
+  var C = {
+    white: rgb(255,255,255), noir: rgb(25,25,25),
+    // vivid line colors
+    fwy: rgb(255,0,152), hwy: rgb(255,106,0), major: rgb(255,230,0),
+    minor: rgb(0,229,255), local: rgb(120,120,120), tunnel: rgb(160,160,160),
+    // water & areas
+    waterL: rgb(0,168,255), waterA: rgb(191,232,255), bathy: rgb(160,205,245),
+    rail: rgb(138,43,226), ferry: rgb(0,200,180), bndry: rgb(255,45,45),
+    parkA: rgb(67,255,100), forest: rgb(0,200,83), land: rgb(245,242,235),
+    poi: rgb(41,98,255), medical: rgb(255,59,59), education: rgb(123,97,255),
+    retail: rgb(255,127,0), landmark: rgb(255,0,255), emergency: rgb(255,23,68),
+    cemetery: rgb(126,140,141), golf: rgb(46,204,113), industry: rgb(255,179,0),
+    transport: rgb(41,98,255), military: rgb(109,76,65)
+  };
+
+  var FALLBACK_FONTS=["SourceSansPro-Regular","ArialMT","Helvetica","MyriadPro-Regular"];
+  function findTextFont(family,style){
+    try{
+      var i,tf;
+      if (family||style){
+        for(i=0;i<app.textFonts.length;i++){tf=app.textFonts[i]; if((!family||tf.family===family)&&(!style||tf.style===style)) return tf;}
+        if (family){ for(i=0;i<app.textFonts.length;i++){tf=app.textFonts[i]; if(tf.family===family) return tf;} }
+      }
+      for(i=0;i<FALLBACK_FONTS.length;i++){ try{ return app.textFonts.getByName(FALLBACK_FONTS[i]); }catch(e){} }
+    }catch(e){}
+    return app.textFonts.length ? app.textFonts[0] : null;
+  }
+
+  // ---------- rule table (keys are sub-layer names) ----------
+  // We match by RegExp against the sub-layer name ONLY.
+  // Each entry: {re: /.../i, textStyle:{...}, pathStyle:{...}}
+  // If both styles exist, they will be applied to matching item types under that sublayer.
+  var RULES = [
+    // City / POI label families
+    {re:/^City large scale\/x large( Halo)?$/i, textStyle:{fontFamily:"Source Sans Pro",fontStyle:"Bold",fontSize:16,tracking:10,fillText:C.noir,halo:true,haloColor:C.white,haloWeight:3.0}},
+    {re:/^City large scale\/medium( Halo)?$/i,  textStyle:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:12.5,tracking:8,fillText:C.noir,halo:true,haloColor:C.white,haloWeight:2.4}},
+    {re:/^Point of interest\/General( Halo)?$/i, textStyle:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.poi,halo:true,haloColor:C.white,haloWeight:1.8}},
+
+    // Thematic labels (with halos)
+    {re:/^Admin0 forest or park\/label\/Default( Halo)?$/i, textStyle:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.forest,halo:true,haloColor:C.white,haloWeight:1.8}},
+    {re:/^Medical\/label\/Default( Halo)?$/i, textStyle:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:9,fillText:C.medical,halo:true,haloColor:C.white,haloWeight:1.8}},
+    {re:/^Education\/label\/Default( Halo)?$/i, textStyle:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:9,fillText:C.education,halo:true,haloColor:C.white,haloWeight:1.8}},
+    {re:/^Park or farming\/label\/Default( Halo)?$/i, textStyle:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.parkA,halo:true,haloColor:C.white,haloWeight:1.8}},
+    {re:/^Golf course\/label\/Default( Halo)?$/i, textStyle:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.golf,halo:true,haloColor:C.white,haloWeight:1.8}},
+    {re:/^Military\/label\/Default( Halo)?$/i, textStyle:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.military,halo:true,haloColor:C.white,haloWeight:1.8}},
+    {re:/^Cemetery\/label\/Default( Halo)?$/i, textStyle:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.cemetery,halo:true,haloColor:C.white,haloWeight:1.8}},
+
+    // Road label families
+    {re:/^Road\/label\/Highway( Halo)?$/i, textStyle:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:10,fillText:C.hwy,halo:true,haloColor:C.white,haloWeight:2.2}},
+    {re:/^Road\/label\/Major(, alt name)?( Halo)?$/i, textStyle:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:9.5,fillText:C.major,halo:true,haloColor:C.white,haloWeight:2.0}},
+    {re:/^Road\/label\/Minor( Halo)?$/i, textStyle:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:8.8,fillText:C.minor,halo:true,haloColor:C.white,haloWeight:1.6}},
+    {re:/^Road\/label\/Local( Halo)?$/i, textStyle:{fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:8.5,fillText:C.local,halo:true,haloColor:C.white,haloWeight:1.4}},
+    {re:/^Road\/label\/Shield blue white( Labels)?$/i, textStyle:{fontFamily:"Source Sans Pro",fontStyle:"Bold",fontSize:9.5,fillText:C.hwy,halo:true,haloColor:C.white,haloWeight:2.2}},
+    {re:/^Road\/label\/Shield blue white Points$/i, pathStyle:{fillColor:C.white, forceFill:true, strokeColor:C.hwy, strokeWeight:1.1}},
+    {re:/^Road\/label\/Secondary Hwy white black$/i, textStyle:{fontFamily:"Source Sans Pro",fontStyle:"Semibold",fontSize:9.5,fillText:C.noir,halo:true,haloColor:C.white,haloWeight:2.0}},
+    {re:/^Road\/label\/Rectangle white black$/i, pathStyle:{fillColor:C.white, forceFill:true, strokeColor:C.noir, strokeWeight:1.0}},
+
+    // Road geometry & tunnels
+    {re:/^Road( tunnel)?\/Freeway Motorway\/0$/i, pathStyle:{strokeColor:C.fwy, strokeWeight:1.9, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {re:/^Road( tunnel)?\/Freeway Motorway\/1$/i, pathStyle:{strokeColor:C.fwy, strokeWeight:1.6, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {re:/^Road( tunnel)?\/Freeway Motorway\/2$/i, pathStyle:{strokeColor:C.fwy, strokeWeight:1.3, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {re:/^Road( tunnel)?\/Highway\/[0-2]$/i,     pathStyle:{strokeColor:C.hwy, strokeWeight:1.3, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {re:/^Road( tunnel)?\/Major\/[0-1]$/i,       pathStyle:{strokeColor:C.major, strokeWeight:1.1, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {re:/^Road( tunnel)?\/Major, ramp or traffic circle\/[0-2]$/i,
+                                              pathStyle:{strokeColor:C.major, strokeWeight:1.0, strokeDashes:[3,1.5], strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {re:/^Road( tunnel)?\/Minor\/[0-1]$/i,       pathStyle:{strokeColor:C.minor, strokeWeight:0.9, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {re:/^Road( tunnel)?\/Minor, ramp or traffic circle\/[0-1]$/i,
+                                              pathStyle:{strokeColor:C.minor, strokeWeight:0.85, strokeDashes:[2.5,1.3], strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {re:/^Road( tunnel)?\/(Local\/1|Service\/0)$/i, pathStyle:{strokeColor:C.local, strokeWeight:0.7, strokeCap:StrokeCap.ROUNDENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN, opacity:85}},
+
+    // Rails / Ferry / Boundaries
+    {re:/^Railroad\/[0-2]$/i, pathStyle:{strokeColor:C.rail, strokeWeight:0.9, strokeDashes:[2.2,2.2]}},
+    {re:/^Ferry\/Ferry$/i,    pathStyle:{strokeColor:C.ferry, strokeWeight:1.0, strokeDashes:[3,2]}},
+    {re:/^Boundary line\/Admin1\/[01]$/i, pathStyle:{strokeColor:C.bndry, strokeWeight:0.7, strokeDashes:[1.2,1.2], opacity:85}},
+
+    // Water
+    {re:/^Water line(\/(Default|label\/Default|Stream or river))?$/i, pathStyle:{strokeColor:C.waterL, strokeWeight:0.9, strokeCap:StrokeCap.BUTTENDCAP, strokeJoin:StrokeJoin.ROUNDENDJOIN}},
+    {re:/^Water area\/Lake, river or bay$/i, pathStyle:{fillColor:C.waterA, forceFill:true, strokeColor:null}},
+    {re:/^Marine area\/bathymetry depth 1$/i, pathStyle:{fillColor:C.bathy, forceFill:true, strokeColor:null}},
+
+    // Landuse areas (vivid to verify)
+    {re:/^Park or farming$/i, pathStyle:{fillColor:C.parkA, forceFill:true, strokeColor:null}},
+    {re:/^Medical$/i, pathStyle:{fillColor:C.medical, forceFill:true}},
+    {re:/^Education$/i, pathStyle:{fillColor:C.education, forceFill:true}},
+    {re:/^Landmark$/i, pathStyle:{fillColor:C.landmark, forceFill:true}},
+    {re:/^Emergency$/i, pathStyle:{fillColor:C.emergency, forceFill:true}},
+    {re:/^Cemetery$/i, pathStyle:{fillColor:C.cemetery, forceFill:true}},
+    {re:/^Retail$/i, pathStyle:{fillColor:C.retail, forceFill:true}},
+    {re:/^Golf course$/i, pathStyle:{fillColor:C.golf, forceFill:true}},
+    {re:/^Industry$/i, pathStyle:{fillColor:C.industry, forceFill:true}},
+    {re:/^Transportation$/i, pathStyle:{fillColor:C.transport, forceFill:true}},
+    {re:/^Military$/i, pathStyle:{fillColor:C.military, forceFill:true}},
+    {re:/^Admin0 forest or park$/i, pathStyle:{fillColor:C.forest, forceFill:true}},
+    {re:/^Land\/Not ice$/i, pathStyle:{fillColor:C.land, forceFill:true, strokeColor:null}}
+  ];
+
+  // Visible fallback (so you will always see change if a name didn’t match)
+  var FALLBACK_TEXT = {fontFamily:"Source Sans Pro",fontStyle:"Regular",fontSize:9,fillText:C.noir,halo:true,haloColor:C.white,haloWeight:1.6};
+  var FALLBACK_PATH = {fillColor:rgb(255,255,0), forceFill:true, strokeColor:rgb(0,0,0), strokeWeight:1.2, opacity:100};
+
+  // ---------- progress ----------
+  function Progress(title,max){
+    var p=new Window('palette',title); p.alignChildren='fill';
+    p.pbar=p.add('progressbar',undefined,0,Math.max(1,max||1));
+    p.msg=p.add('statictext',undefined,'Starting…'); p.msg.characters=60; p.show();
+    p.step=function(txt){ this.pbar.value++; if(txt) this.msg.text=txt; p.update(); };
+    p.done=function(){ try{ this.close(); }catch(e){} };
+    return p;
+  }
+
+  // ---------- find the DEEPEST "2025 JLL Light Basemap" ----------
+  function findAllByName(root, name){
+    var out=[];
+    function walk(layer){
+      if (layer.name && layer.name.toLowerCase()===name.toLowerCase()) out.push(layer);
+      for (var i=0;i<layer.layers.length;i++) walk(layer.layers[i]);
+    }
+    for (var L=0; L<root.layers.length; L++) walk(root.layers[L]);
+    return out;
+  }
+  var candidates = findAllByName(doc, "2025 JLL Light Basemap");
+  if (!candidates.length){ alert('Could not find "2025 JLL Light Basemap".'); return; }
+  // pick deepest (most descendants)
+  var best=candidates[0], bestDepth=-1;
+  function depthOf(layer){ var d=0, p=layer; while(p && p.parent && p.parent.typename!=="Document"){ if (p.parent.typename==="Layer") d++; p=p.parent; } return d; }
+  for (var i0=0;i0<candidates.length;i0++){ var d=depthOf(candidates[i0]); if (d>bestDepth){ bestDepth=d; best=candidates[i0]; } }
+
+  // If it has only one child with same name (double-wrapped), go to that child
+  if (best.layers.length===1 && (best.layers[0].name||"").toLowerCase()==="2025 jll light basemap"){ best = best.layers[0]; }
+
+  // ---------- walk a container & collect items ----------
+  function unlockShow(obj){
+    try{ if ('locked' in obj && obj.locked) obj.locked=false; }catch(e){}
+    try{ if ('hidden' in obj && obj.hidden) obj.hidden=false; }catch(e){}
+    try{ if ('visible' in obj && obj.visible===false) obj.visible=true; }catch(e){}
+  }
+  function collectAll(container, bag){
+    unlockShow(container);
+    var i;
+    for(i=0;i<container.groupItems.length;i++) collectAll(container.groupItems[i], bag);
+    for(i=0;i<container.pathItems.length;i++){ unlockShow(container.pathItems[i]); bag.push(container.pathItems[i]); }
+    for(i=0;i<container.compoundPathItems.length;i++){ unlockShow(container.compoundPathItems[i]); bag.push(container.compoundPathItems[i]); }
+    for(i=0;i<container.textFrames.length;i++){ unlockShow(container.textFrames[i]); bag.push(container.textFrames[i]); }
+  }
+
+  // ---------- apply style helpers ----------
+  function applyTextStyle(tf, style){
+    try{
+      var tr=tf.textRange, ca=tr.characterAttributes;
+      var f=findTextFont(style.fontFamily||(ca.textFont?ca.textFont.family:null),
+                         style.fontStyle||(ca.textFont?ca.textFont.style:null));
+      if (f) ca.textFont=f;
+      if (style.fontSize) ca.size=style.fontSize;
+      if (style.tracking!==undefined) ca.tracking=style.tracking;
+      if (style.fillText) ca.fillColor=style.fillText;
+      if (style.halo){ ca.strokeColor=style.haloColor||C.white; ca.strokeWeight=style.haloWeight||1.6; ca.strokeOverPrint=false; }
+    }catch(e){}
+  }
+  function applyPathStyle(item, style){
+    try{
+      if (item.typename==="CompoundPathItem"){ for (var i=0;i<item.pathItems.length;i++) applyPathStyle(item.pathItems[i],style); return; }
+      if (style.forceFill && style.fillColor){ item.filled=true; item.fillColor=style.fillColor; }
+      if (style.fillColor && item.filled) item.fillColor=style.fillColor;
+      if (style.strokeColor===null){ item.stroked=false; }
+      else if (style.strokeColor){ item.stroked=true; item.strokeColor=style.strokeColor; }
+      if (style.strokeWeight!==undefined && item.stroked) item.strokeWidth=style.strokeWeight;
+      if (style.strokeCap && item.stroked) item.strokeCap=style.strokeCap;
+      if (style.strokeJoin && item.stroked) item.strokeJoin=style.strokeJoin;
+      if (style.strokeDashes && item.stroked) item.strokeDashes=style.strokeDashes;
+      if (style.opacity!==undefined) item.opacity=style.opacity;
+    }catch(e){}
+  }
+
+  function findRuleBySubLayerName(name){
+    for (var r=0;r<RULES.length;r++){
+      try{ if (RULES[r].re.test(name)) return RULES[r]; }catch(e){}
+    }
+    return null;
+  }
+
+  // ---------- core: process the basemap ----------
+  var total=0, counts={text:0,path:0,unmatched:0, rules:{}};
+
+  function processSubLayer(L){
+    unlockShow(L);
+    var name=L.name||"";
+    // Gather all items first
+    var bag=[]; collectAll(L, bag);
+    total += bag.length;
+
+    // Find a rule for THIS sub-layer name
+    var rule = findRuleBySubLayerName(name);
+
+    for (var i=0;i<bag.length;i++){
+      var it=bag[i];
+      try{
+        if (it.typename==="TextFrame"){
+          if (rule && rule.textStyle){ applyTextStyle(it, rule.textStyle); counts.text++; counts.rules[name]=(counts.rules[name]||0)+1; }
+          else { applyTextStyle(it, FALLBACK_TEXT); counts.text++; counts.unmatched++; }
+        } else if (it.typename==="PathItem" || it.typename==="CompoundPathItem"){
+          if (rule && rule.pathStyle){ applyPathStyle(it, rule.pathStyle); counts.path++; counts.rules[name]=(counts.rules[name]||0)+1; }
+          else if (rule && rule.textStyle && !rule.pathStyle){
+            // Layer is text-only rule; keep paths visible fallback for debugging
+            applyPathStyle(it, FALLBACK_PATH); counts.path++; counts.unmatched++;
+          } else {
+            applyPathStyle(it, FALLBACK_PATH); counts.path++; counts.unmatched++;
+          }
+        }
+      }catch(e){}
+    }
+
+    // Recurse into deeper sublayers too
+    for (var s=0;s<L.layers.length;s++) processSubLayer(L.layers[s]);
+  }
+
+  // Run only inside the deep basemap layer
+  var p = Progress('Basemap ULTRA — styling "' + (best.name||"basemap") + '" …', best.layers.length||1);
+  for (var s0=0; s0<best.layers.length; s0++){
+    processSubLayer(best.layers[s0]);
+    p.step(best.layers[s0].name||("Sublayer "+s0));
+  }
+  p.done();
+
+  var lines=[];
+  lines.push('DONE — '+total+' item(s) inspected under "2025 JLL Light Basemap".');
+  lines.push('Text styled: '+counts.text+' | Paths styled: '+counts.path+' | Fallback (unmatched sublayers) hits: '+counts.unmatched);
+  lines.push('Top sublayers hit (counts are per-item):');
+  var shown=0; for (var k in counts.rules){ lines.push('  • '+k+' → '+counts.rules[k]); if (++shown>20) break; }
+  alert(lines.join("\n"));
+})();
