@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Circle Grid Illustrator — Powerful Web App</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark"></div>
+    <div>
+      <div class="brand-title">Circle Grid Illustrator</div>
+      <div class="brand-sub">Design with dots, grids & geometry</div>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <button id="btnNew" class="btn">New</button>
+    <button id="btnUndo" class="btn" title="Undo (Ctrl/Cmd+Z)">Undo</button>
+    <button id="btnRedo" class="btn" title="Redo (Ctrl/Cmd+Shift+Z)">Redo</button>
+    <button id="btnExportPNG" class="btn btn-primary">Export PNG</button>
+    <button id="btnExportSVG" class="btn btn-primary">Export SVG</button>
+    <button id="btnExportJSON" class="btn">Save</button>
+    <label class="btn">
+      Load
+      <input type="file" id="fileLoad" accept="application/json" hidden />
+    </label>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="panel left">
+    <section class="panel-section">
+      <h3>Tools</h3>
+      <div class="tool-grid" id="toolGrid">
+        <button class="tool active" data-tool="paint" title="Paint (B)">
+          <span class="tool-icon">●</span><span class="tool-label">Paint</span>
+        </button>
+        <button class="tool" data-tool="erase" title="Erase (E)">
+          <span class="tool-icon">○</span><span class="tool-label">Erase</span>
+        </button>
+        <button class="tool" data-tool="fill" title="Fill (G)">
+          <span class="tool-icon">▣</span><span class="tool-label">Fill</span>
+        </button>
+        <button class="tool" data-tool="line" title="Line (L)">
+          <span class="tool-icon">╱</span><span class="tool-label">Line</span>
+        </button>
+        <button class="tool" data-tool="rect" title="Rect (R)">
+          <span class="tool-icon">▭</span><span class="tool-label">Rect</span>
+        </button>
+        <button class="tool" data-tool="circle" title="Circle (C)">
+          <span class="tool-icon">◯</span><span class="tool-label">Ring</span>
+        </button>
+        <button class="tool" data-tool="picker" title="Eyedropper (I)">
+          <span class="tool-icon">⌖</span><span class="tool-label">Pick</span>
+        </button>
+        <button class="tool" data-tool="move" title="Move (M)">
+          <span class="tool-icon">✥</span><span class="tool-label">Move</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="panel-section">
+      <h3>Brush</h3>
+      <label class="row">
+        <span>Size</span>
+        <input type="range" id="brushSize" min="1" max="10" value="1" />
+        <span id="brushSizeVal" class="num">1</span>
+      </label>
+      <label class="row">
+        <span>Shape</span>
+        <select id="cellShape">
+          <option value="circle">Circle</option>
+          <option value="ring">Ring</option>
+          <option value="square">Square</option>
+          <option value="diamond">Diamond</option>
+          <option value="hexagon">Hexagon</option>
+          <option value="triangle">Triangle</option>
+          <option value="star">Star</option>
+        </select>
+      </label>
+      <label class="row">
+        <span>Fill %</span>
+        <input type="range" id="cellFill" min="20" max="100" value="85" />
+        <span id="cellFillVal" class="num">85</span>
+      </label>
+    </section>
+
+    <section class="panel-section">
+      <h3>Symmetry</h3>
+      <div class="sym-grid">
+        <label><input type="checkbox" id="symX" /> Mirror X</label>
+        <label><input type="checkbox" id="symY" /> Mirror Y</label>
+        <label><input type="checkbox" id="symDiag" /> Diagonal</label>
+        <label><input type="checkbox" id="symRadial" /> Radial</label>
+      </div>
+      <label class="row">
+        <span>Radial folds</span>
+        <input type="range" id="radialFolds" min="2" max="12" value="6" />
+        <span id="radialFoldsVal" class="num">6</span>
+      </label>
+    </section>
+  </aside>
+
+  <section class="canvas-wrap">
+    <div class="canvas-toolbar">
+      <div class="zoom-row">
+        <button id="btnZoomOut" class="mini">−</button>
+        <span id="zoomLabel">100%</span>
+        <button id="btnZoomIn" class="mini">+</button>
+        <button id="btnZoomFit" class="mini">Fit</button>
+      </div>
+      <div class="info-row">
+        <span id="cursorInfo">—</span>
+        <span class="dot-sep"></span>
+        <span id="gridInfo">32×32</span>
+      </div>
+      <div class="bg-row">
+        <label>BG</label>
+        <input type="color" id="bgColor" value="#0e1116" />
+        <label class="ck"><input type="checkbox" id="showGrid" checked /> Grid</label>
+        <label class="ck"><input type="checkbox" id="showGuides" /> Guides</label>
+      </div>
+    </div>
+    <div class="canvas-host" id="canvasHost">
+      <canvas id="board"></canvas>
+      <canvas id="overlay"></canvas>
+    </div>
+    <div class="status-row">
+      <span id="statusLeft">Ready.</span>
+      <span id="statusRight"></span>
+    </div>
+  </section>
+
+  <aside class="panel right">
+    <section class="panel-section">
+      <h3>Grid</h3>
+      <label class="row">
+        <span>Columns</span>
+        <input type="number" id="cols" min="4" max="128" value="32" />
+      </label>
+      <label class="row">
+        <span>Rows</span>
+        <input type="number" id="rows" min="4" max="128" value="32" />
+      </label>
+      <label class="row">
+        <span>Cell px</span>
+        <input type="range" id="cellPx" min="8" max="48" value="22" />
+        <span id="cellPxVal" class="num">22</span>
+      </label>
+      <label class="row">
+        <span>Gap</span>
+        <input type="range" id="cellGap" min="0" max="10" value="2" />
+        <span id="cellGapVal" class="num">2</span>
+      </label>
+      <div class="row btn-row">
+        <button class="btn small" id="btnClear">Clear</button>
+        <button class="btn small" id="btnInvert">Invert</button>
+        <button class="btn small" id="btnRand">Randomize</button>
+      </div>
+    </section>
+
+    <section class="panel-section">
+      <h3>Color</h3>
+      <div class="color-row">
+        <input type="color" id="primaryColor" value="#7ee8fa" />
+        <input type="color" id="secondaryColor" value="#eec0c6" />
+        <button class="mini" id="swapColors" title="Swap">⇄</button>
+      </div>
+      <label class="row">
+        <span>Mode</span>
+        <select id="colorMode">
+          <option value="solid">Solid</option>
+          <option value="gradient">Gradient</option>
+          <option value="rainbow">Rainbow Cycle</option>
+          <option value="palette">From Palette</option>
+        </select>
+      </label>
+      <div class="palette" id="palette"></div>
+      <div class="row">
+        <button class="btn small" id="btnAddSwatch">+ Swatch</button>
+        <button class="btn small" id="btnClearSwatch">Clear Swatches</button>
+      </div>
+    </section>
+
+    <section class="panel-section">
+      <h3>Presets</h3>
+      <div class="preset-grid" id="presetGrid"></div>
+    </section>
+
+    <section class="panel-section">
+      <h3>Effects</h3>
+      <label class="row"><span>Glow</span>
+        <input type="range" id="fxGlow" min="0" max="40" value="0" />
+        <span id="fxGlowVal" class="num">0</span>
+      </label>
+      <label class="row"><span>Rotation°</span>
+        <input type="range" id="fxRot" min="0" max="360" value="0" />
+        <span id="fxRotVal" class="num">0</span>
+      </label>
+      <label class="row"><span>Scatter</span>
+        <input type="range" id="fxScatter" min="0" max="20" value="0" />
+        <span id="fxScatterVal" class="num">0</span>
+      </label>
+      <label class="row"><span>Animate</span>
+        <select id="fxAnim">
+          <option value="none">None</option>
+          <option value="pulse">Pulse</option>
+          <option value="wave">Wave</option>
+          <option value="rotate">Rotate</option>
+          <option value="rainbow">Rainbow</option>
+        </select>
+      </label>
+    </section>
+  </aside>
+</main>
+
+<footer class="footer">
+  <div class="hint">
+    <kbd>B</kbd> Paint · <kbd>E</kbd> Erase · <kbd>G</kbd> Fill · <kbd>L</kbd> Line · <kbd>R</kbd> Rect · <kbd>C</kbd> Ring · <kbd>I</kbd> Pick · <kbd>M</kbd> Move · <kbd>X</kbd> Swap · <kbd>Ctrl/⌘+Z</kbd> Undo · <kbd>+/−</kbd> Zoom · <kbd>Space</kbd> Pan
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
