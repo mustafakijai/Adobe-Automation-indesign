@@ -1,0 +1,15 @@
+{
+  "name": "claude-design",
+  "version": "1.0.0",
+  "description": "Config-driven brand kit + pitch deck generator. A Claude design, by Claude.",
+  "bin": {
+    "claude-design": "build.js"
+  },
+  "scripts": {
+    "build": "node build.js",
+    "example": "node build.js config/acme.json"
+  },
+  "optionalDependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}

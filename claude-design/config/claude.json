@@ -1,0 +1,19 @@
+{
+  "name": "Claude",
+  "tagline": "Clear, warm, human.",
+  "deck": {
+    "slides": [
+      { "type": "title", "title": "Claude", "subtitle": "A design system you can run on any project." },
+      { "type": "section", "kicker": "01", "title": "The idea" },
+      { "type": "content", "title": "One config, every asset", "bullets": [
+        "Describe your brand once in a small JSON file.",
+        "Run a single command to generate a full kit.",
+        "Editable vector output — opens in Illustrator, Figma, any browser.",
+        "Restyle everything by changing a few colour tokens."
+      ] },
+      { "type": "stat", "value": "8", "label": "branded assets generated from one config" },
+      { "type": "quote", "quote": "Good design is as little design as possible — but consistent everywhere.", "by": "the brief" },
+      { "type": "closing", "title": "Designed by Claude.", "contact": "claude.ai/design" }
+    ]
+  }
+}

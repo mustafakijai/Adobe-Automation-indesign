@@ -1,0 +1,26 @@
+{
+  "name": "Northwind",
+  "tagline": "Logistics, simplified.",
+  "colors": {
+    "primary": "#2F6F8F",
+    "primaryDark": "#1F4E66",
+    "bg": "#EEF2F4",
+    "surface": "#FBFCFD",
+    "text": "#11212B",
+    "muted": "#3C5462",
+    "onPrimary": "#FBFCFD"
+  },
+  "deck": {
+    "slides": [
+      { "type": "title", "title": "Northwind", "subtitle": "Logistics, simplified — from warehouse to doorstep." },
+      { "type": "section", "kicker": "01", "title": "The problem" },
+      { "type": "content", "title": "Shipping is still painful", "bullets": [
+        "Fragmented carriers and opaque pricing.",
+        "No single view of a shipment in motion.",
+        "Manual reconciliation eats hours every week."
+      ] },
+      { "type": "stat", "value": "37%", "label": "lower fulfilment cost in pilot" },
+      { "type": "closing", "title": "Let's move.", "contact": "hello@northwind.example" }
+    ]
+  }
+}

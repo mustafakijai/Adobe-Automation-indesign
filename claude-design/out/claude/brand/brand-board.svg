@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1040" viewBox="0 0 1600 1040">
+  <defs>
+    <linearGradient id="warm" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#D97757"/>
+      <stop offset="1" stop-color="#C15F3C"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="1040" fill="#F0EEE6"/>
+  <rect x="40" y="40" width="1520" height="960" rx="28" fill="#FAF9F5" stroke="#F0EEE6" stroke-width="2"/>
+
+  <g><path d="M180.40,170.20 L179.36,95.00 A9.36,9.36 0 0 1 160.64,95.00 L159.60,170.20 A10.40,10.40 0 0 1 180.40,170.20 Z" fill="#D97757"/><path d="M179.66,175.50 L203.18,137.36 A7.56,7.56 0 0 1 190.46,129.19 L165.53,166.42 A8.40,8.40 0 0 1 179.66,175.50 Z" fill="#D97757"/><path d="M178.69,182.47 L246.66,150.28 A9.36,9.36 0 0 1 238.88,133.25 L170.05,163.55 A10.40,10.40 0 0 1 178.69,182.47 Z" fill="#D97757"/><path d="M173.56,184.00 L218.02,189.54 A7.56,7.56 0 0 1 220.17,174.58 L175.95,167.37 A8.40,8.40 0 0 1 173.56,184.00 Z" fill="#D97757"/><path d="M166.82,186.00 L224.33,234.46 A9.36,9.36 0 0 1 236.59,220.32 L180.44,170.28 A10.40,10.40 0 0 1 166.82,186.00 Z" fill="#D97757"/><path d="M163.29,181.97 L176.72,224.72 A7.56,7.56 0 0 1 191.23,220.46 L179.41,177.24 A8.40,8.40 0 0 1 163.29,181.97 Z" fill="#D97757"/><path d="M158.67,176.68 L138.48,249.12 A9.36,9.36 0 0 1 156.44,254.40 L178.63,182.54 A10.40,10.40 0 0 1 158.67,176.68 Z" fill="#D97757"/><path d="M160.87,171.80 L127.56,201.77 A7.56,7.56 0 0 1 137.47,213.19 L171.87,184.49 A8.40,8.40 0 0 1 160.87,171.80 Z" fill="#D97757"/><path d="M163.77,165.39 L89.48,177.12 A9.36,9.36 0 0 1 92.15,195.65 L166.73,185.98 A10.40,10.40 0 0 1 163.77,165.39 Z" fill="#D97757"/><path d="M169.12,165.37 L128.02,147.52 A7.56,7.56 0 0 1 121.74,161.27 L162.14,180.65 A8.40,8.40 0 0 1 169.12,165.37 Z" fill="#D97757"/><path d="M176.15,165.34 L134.62,102.64 A9.36,9.36 0 0 1 118.87,112.76 L158.66,176.58 A10.40,10.40 0 0 1 176.15,165.34 Z" fill="#D97757"/></g>
+  <text x="280" y="205" font-family="Georgia, 'Times New Roman', serif" font-size="110" font-weight="500" fill="#141413">Claude</text>
+  <text x="284" y="250" font-family="'Helvetica Neue', Arial, sans-serif" font-size="24" letter-spacing="6" fill="#3D3D3A">BRAND&#160;&#160;BOARD</text>
+
+  <rect x="1090" y="110" width="420" height="150" rx="20" fill="url(#warm)"/>
+  <g><path d="M1180.98,182.24 L1180.38,139.00 A5.38,5.38 0 0 1 1169.62,139.00 L1169.02,182.24 A5.98,5.98 0 0 1 1180.98,182.24 Z" fill="#FAF9F5"/><path d="M1180.56,185.29 L1194.08,163.36 A4.35,4.35 0 0 1 1186.76,158.66 L1172.43,180.07 A4.83,4.83 0 0 1 1180.56,185.29 Z" fill="#FAF9F5"/><path d="M1179.99,189.29 L1219.08,170.79 A5.38,5.38 0 0 1 1214.61,161.00 L1175.03,178.41 A5.98,5.98 0 0 1 1179.99,189.29 Z" fill="#FAF9F5"/><path d="M1177.04,190.17 L1202.61,193.36 A4.35,4.35 0 0 1 1203.85,184.76 L1178.42,180.61 A4.83,4.83 0 0 1 1177.04,190.17 Z" fill="#FAF9F5"/><path d="M1173.17,191.33 L1206.24,219.19 A5.38,5.38 0 0 1 1213.29,211.06 L1181.00,182.29 A5.98,5.98 0 0 1 1173.17,191.33 Z" fill="#FAF9F5"/><path d="M1171.14,189.01 L1178.86,213.59 A4.35,4.35 0 0 1 1187.21,211.14 L1180.41,186.29 A4.83,4.83 0 0 1 1171.14,189.01 Z" fill="#FAF9F5"/><path d="M1168.48,185.96 L1156.88,227.62 A5.38,5.38 0 0 1 1167.20,230.65 L1179.96,189.33 A5.98,5.98 0 0 1 1168.48,185.96 Z" fill="#FAF9F5"/><path d="M1169.75,183.16 L1150.60,200.39 A4.35,4.35 0 0 1 1156.29,206.96 L1176.08,190.46 A4.83,4.83 0 0 1 1169.75,183.16 Z" fill="#FAF9F5"/><path d="M1171.42,179.47 L1128.70,186.22 A5.38,5.38 0 0 1 1130.23,196.87 L1173.12,191.31 A5.98,5.98 0 0 1 1171.42,179.47 Z" fill="#FAF9F5"/><path d="M1174.50,179.46 L1150.86,169.20 A4.35,4.35 0 0 1 1147.25,177.11 L1170.48,188.25 A4.83,4.83 0 0 1 1174.50,179.46 Z" fill="#FAF9F5"/><path d="M1178.54,179.45 L1154.66,143.39 A5.38,5.38 0 0 1 1145.60,149.21 L1168.48,185.91 A5.98,5.98 0 0 1 1178.54,179.45 Z" fill="#FAF9F5"/></g>
+  <text x="1240" y="178" font-family="Georgia, 'Times New Roman', serif" font-size="34" fill="#FAF9F5">Designed by</text>
+  <text x="1240" y="222" font-family="Georgia, 'Times New Roman', serif" font-size="34" font-weight="600" fill="#FAF9F5">Claude</text>
+
+  <line x1="90" y1="320" x2="1510" y2="320" stroke="#F0EEE6" stroke-width="2"/>
+
+  <text x="90" y="400" font-family="'Helvetica Neue', Arial, sans-serif" font-size="22" letter-spacing="4" fill="#3D3D3A">01 — COLOUR PALETTE</text>
+  
+    <rect x="90" y="470" width="220" height="180" rx="14" fill="#D97757" stroke="#F0EEE6" stroke-width="1"/>
+    <text x="108" y="610" font-family="Georgia, serif" font-size="22" fill="#FAF9F5">Primary</text>
+    <text x="108" y="634" font-family="monospace" font-size="16" fill="#FAF9F5" opacity="0.7">#D97757</text>
+    <rect x="328" y="470" width="220" height="180" rx="14" fill="#C15F3C" stroke="#F0EEE6" stroke-width="1"/>
+    <text x="346" y="610" font-family="Georgia, serif" font-size="22" fill="#FAF9F5">Primary Dark</text>
+    <text x="346" y="634" font-family="monospace" font-size="16" fill="#FAF9F5" opacity="0.7">#C15F3C</text>
+    <rect x="566" y="470" width="220" height="180" rx="14" fill="#F0EEE6" stroke="#F0EEE6" stroke-width="1"/>
+    <text x="584" y="610" font-family="Georgia, serif" font-size="22" fill="#141413">Background</text>
+    <text x="584" y="634" font-family="monospace" font-size="16" fill="#141413" opacity="0.7">#F0EEE6</text>
+    <rect x="804" y="470" width="220" height="180" rx="14" fill="#FAF9F5" stroke="#F0EEE6" stroke-width="1"/>
+    <text x="822" y="610" font-family="Georgia, serif" font-size="22" fill="#141413">Surface</text>
+    <text x="822" y="634" font-family="monospace" font-size="16" fill="#141413" opacity="0.7">#FAF9F5</text>
+    <rect x="1042" y="470" width="220" height="180" rx="14" fill="#3D3D3A" stroke="#F0EEE6" stroke-width="1"/>
+    <text x="1060" y="610" font-family="Georgia, serif" font-size="22" fill="#FAF9F5">Muted</text>
+    <text x="1060" y="634" font-family="monospace" font-size="16" fill="#FAF9F5" opacity="0.7">#3D3D3A</text>
+    <rect x="1280" y="470" width="220" height="180" rx="14" fill="#141413" stroke="#F0EEE6" stroke-width="1"/>
+    <text x="1298" y="610" font-family="Georgia, serif" font-size="22" fill="#FAF9F5">Text</text>
+    <text x="1298" y="634" font-family="monospace" font-size="16" fill="#FAF9F5" opacity="0.7">#141413</text>
+
+  <text x="90" y="740" font-family="'Helvetica Neue', Arial, sans-serif" font-size="22" letter-spacing="4" fill="#3D3D3A">02 — TYPOGRAPHY</text>
+  <text x="90" y="820" font-family="Georgia, 'Times New Roman', serif" font-size="64" fill="#141413">Aa — Clear, warm, human.</text>
+  <text x="90" y="868" font-family="Georgia, 'Times New Roman', serif" font-size="26" fill="#3D3D3A">Serif display for headlines · the considered, editorial voice.</text>
+  <text x="90" y="922" font-family="'Helvetica Neue', Arial, sans-serif" font-size="26" fill="#3D3D3A">Sans for body &amp; UI · clean, legible, modern.</text>
+  <text x="90" y="966" font-family="'Courier New', monospace" font-size="20" fill="#3D3D3A">Mono for code &amp; values · 0123456789 #D97757</text>
+
+  <text x="980" y="740" font-family="'Helvetica Neue', Arial, sans-serif" font-size="22" letter-spacing="4" fill="#3D3D3A">03 — LOGO USAGE</text>
+  <rect x="980" y="770" width="240" height="190" rx="16" fill="#F0EEE6" stroke="#FAF9F5" stroke-width="1"/>
+  <g><path d="M1106.24,842.12 L1105.62,797.00 A5.62,5.62 0 0 1 1094.38,797.00 L1093.76,842.12 A6.24,6.24 0 0 1 1106.24,842.12 Z" fill="#D97757"/><path d="M1105.80,845.30 L1119.91,822.42 A4.54,4.54 0 0 1 1112.27,817.51 L1097.32,839.85 A5.04,5.04 0 0 1 1105.80,845.30 Z" fill="#D97757"/><path d="M1105.21,849.48 L1146.00,830.17 A5.62,5.62 0 0 1 1141.33,819.95 L1100.03,838.13 A6.24,6.24 0 0 1 1105.21,849.48 Z" fill="#D97757"/><path d="M1102.13,850.40 L1128.81,853.73 A4.54,4.54 0 0 1 1130.10,844.75 L1103.57,840.42 A5.04,5.04 0 0 1 1102.13,850.40 Z" fill="#D97757"/><path d="M1098.09,851.60 L1132.60,880.68 A5.62,5.62 0 0 1 1139.95,872.19 L1106.26,842.17 A6.24,6.24 0 0 1 1098.09,851.60 Z" fill="#D97757"/><path d="M1095.98,849.18 L1104.03,874.83 A4.54,4.54 0 0 1 1112.74,872.28 L1105.65,846.34 A5.04,5.04 0 0 1 1095.98,849.18 Z" fill="#D97757"/><path d="M1093.20,846.01 L1081.09,889.47 A5.62,5.62 0 0 1 1091.87,892.64 L1105.18,849.52 A6.24,6.24 0 0 1 1093.20,846.01 Z" fill="#D97757"/><path d="M1094.52,843.08 L1074.54,861.06 A4.54,4.54 0 0 1 1080.48,867.92 L1101.12,850.69 A5.04,5.04 0 0 1 1094.52,843.08 Z" fill="#D97757"/><path d="M1096.26,839.23 L1051.69,846.27 A5.62,5.62 0 0 1 1053.29,857.39 L1098.04,851.59 A6.24,6.24 0 0 1 1096.26,839.23 Z" fill="#D97757"/><path d="M1099.47,839.22 L1074.81,828.51 A4.54,4.54 0 0 1 1071.05,836.76 L1095.29,848.39 A5.04,5.04 0 0 1 1099.47,839.22 Z" fill="#D97757"/><path d="M1103.69,839.20 L1078.77,801.58 A5.62,5.62 0 0 1 1069.32,807.66 L1093.19,845.95 A6.24,6.24 0 0 1 1103.69,839.20 Z" fill="#D97757"/></g>
+  <text x="1100" y="935" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="40" fill="#141413">Claude</text>
+  <rect x="1240" y="770" width="240" height="190" rx="16" fill="#141413"/>
+  <g><path d="M1366.24,842.12 L1365.62,797.00 A5.62,5.62 0 0 1 1354.38,797.00 L1353.76,842.12 A6.24,6.24 0 0 1 1366.24,842.12 Z" fill="#D97757"/><path d="M1365.80,845.30 L1379.91,822.42 A4.54,4.54 0 0 1 1372.27,817.51 L1357.32,839.85 A5.04,5.04 0 0 1 1365.80,845.30 Z" fill="#D97757"/><path d="M1365.21,849.48 L1406.00,830.17 A5.62,5.62 0 0 1 1401.33,819.95 L1360.03,838.13 A6.24,6.24 0 0 1 1365.21,849.48 Z" fill="#D97757"/><path d="M1362.13,850.40 L1388.81,853.73 A4.54,4.54 0 0 1 1390.10,844.75 L1363.57,840.42 A5.04,5.04 0 0 1 1362.13,850.40 Z" fill="#D97757"/><path d="M1358.09,851.60 L1392.60,880.68 A5.62,5.62 0 0 1 1399.95,872.19 L1366.26,842.17 A6.24,6.24 0 0 1 1358.09,851.60 Z" fill="#D97757"/><path d="M1355.98,849.18 L1364.03,874.83 A4.54,4.54 0 0 1 1372.74,872.28 L1365.65,846.34 A5.04,5.04 0 0 1 1355.98,849.18 Z" fill="#D97757"/><path d="M1353.20,846.01 L1341.09,889.47 A5.62,5.62 0 0 1 1351.87,892.64 L1365.18,849.52 A6.24,6.24 0 0 1 1353.20,846.01 Z" fill="#D97757"/><path d="M1354.52,843.08 L1334.54,861.06 A4.54,4.54 0 0 1 1340.48,867.92 L1361.12,850.69 A5.04,5.04 0 0 1 1354.52,843.08 Z" fill="#D97757"/><path d="M1356.26,839.23 L1311.69,846.27 A5.62,5.62 0 0 1 1313.29,857.39 L1358.04,851.59 A6.24,6.24 0 0 1 1356.26,839.23 Z" fill="#D97757"/><path d="M1359.47,839.22 L1334.81,828.51 A4.54,4.54 0 0 1 1331.05,836.76 L1355.29,848.39 A5.04,5.04 0 0 1 1359.47,839.22 Z" fill="#D97757"/><path d="M1363.69,839.20 L1338.77,801.58 A5.62,5.62 0 0 1 1329.32,807.66 L1353.19,845.95 A6.24,6.24 0 0 1 1363.69,839.20 Z" fill="#D97757"/></g>
+  <text x="1360" y="935" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="40" fill="#FAF9F5">Claude</text>
+
+  <text x="1510" y="970" text-anchor="end" font-family="'Courier New', monospace" font-size="16" fill="#3D3D3A" opacity="0.6">claude · brand v1.0</text>
+</svg>
