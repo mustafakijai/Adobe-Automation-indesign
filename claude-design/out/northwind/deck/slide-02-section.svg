@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+    <rect width="1920" height="1080" fill="#2F6F8F"/>
+    <text x="1790" y="1020" text-anchor="end" font-family="Georgia, 'Times New Roman', serif" font-size="640" font-weight="700" fill="#1F4E66" opacity="0.45">01</text>
+    <text x="130" y="360" font-family="'Helvetica Neue', Arial, sans-serif" font-size="28" letter-spacing="8" fill="#FBFCFD" opacity="0.8">01 — SECTION</text>
+    <text x="130" y="560" font-family="Georgia, 'Times New Roman', serif" font-size="120" font-weight="600" fill="#FBFCFD"><tspan x="130" dy="0">The problem</tspan></text>
+</svg>
