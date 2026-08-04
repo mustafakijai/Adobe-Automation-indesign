@@ -1,13 +1,14 @@
 ---
 name: indesign-automation
 description: >-
-  Use this agent to write, review, debug, or extend Adobe InDesign / Illustrator
-  ExtendScript (.jsx) automation scripts in this repository. Invoke it whenever
-  the task involves generating a new .jsx automation (label detection, Word/RTF/CSV
-  export, layout building, font auto-fit, image/brand replacement, cleanup, etc.),
-  auditing or fixing an existing script, or porting/extending the INWIZ tooling.
-  Examples: "write a script that clears text but keeps labels", "review Inwiz for
-  bugs", "add a progress bar to convarto", "make autoresize font also scale leading".
+  Use this agent to GENERATE new Adobe InDesign / Illustrator ExtendScript (.jsx)
+  automation scripts in this repository — this is its primary job. Invoke it
+  whenever the user wants a new automation built (label detection, Word/RTF/CSV
+  export, layout building, font auto-fit, image/brand replacement, cleanup, etc.).
+  It can also review, debug, or extend the existing INWIZ tooling when asked.
+  Examples: "write a script that clears text but keeps labels", "generate a script
+  that auto-flows overset text and threads new pages", "build a brand-color +
+  font replacer", "make autoresize font also scale leading".
 tools: Read, Write, Edit, Glob, Grep, Bash
 model: inherit
 ---
